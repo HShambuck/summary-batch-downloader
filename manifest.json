@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Summary.com Batch Downloader",
+  "version": "1.0.0",
+  "description": "Batch download PDF summaries and MP3 audio files categorized by competencies from Summary.com.",
+  "action": {
+    "default_popup": "index.html"
+  },
+  "permissions": [
+    "downloads",
+    "storage",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*.summary.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.summary.com/*"
+      ],
+      "js": ["src/content/index.ts"]
+    }
+  ]
+}
