@@ -1,15 +1,30 @@
 import type { DownloadItem, ExtensionMessage } from '../types';
 
-console.log('[Summary.com Content Script] Targeted Scraper loaded...');
-
 function sanitizeFilename(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '').trim();
 }
 
+function getActivePageCompetency(): string {
+  // Extract competency from URL parameters (e.g., ?competence=accountability)
+  const urlParams = new URLSearchParams(window.location.search);
+  const paramCompetency = urlParams.get('competence') || urlParams.get('category');
+  if (paramCompetency) {
+    return paramCompetency.charAt(0).toUpperCase() + paramCompetency.slice(1);
+  }
+
+  // Extract from active filter tags or page headers
+  const activeFilterTag = document.querySelector('.active-filter, [class*="selected-competence"], h1')?.textContent?.trim();
+  if (activeFilterTag && !activeFilterTag.toLowerCase().includes('browse')) {
+    return activeFilterTag;
+  }
+
+  return 'General';
+}
+
 function scrapeCatalog(): DownloadItem[] {
   const itemMap = new Map<string, DownloadItem>();
+  const pageCompetency = getActivePageCompetency();
 
-  // 1. Target Soundview's specific catalog card items and links
   const cardElements = Array.from(document.querySelectorAll('a[href*="/book-summary/"], a[href*="/webinars/"], a[href*="/webinar/"]'));
 
   cardElements.forEach((el, index) => {
@@ -17,15 +32,12 @@ function scrapeCatalog(): DownloadItem[] {
     const href = anchor.href;
     if (!href || itemMap.has(href)) return;
 
-    // Determine type from URL path
     const isWebinar = href.includes('/webinar');
     const type: 'summary' | 'webinar' = isWebinar ? 'webinar' : 'summary';
     const fileType: 'pdf' | 'mp3' = isWebinar ? 'mp3' : 'pdf';
 
-    // Find the enclosing card container to locate the title text and author
     const container = anchor.closest('div, article, li') || anchor;
     
-    // Extract title text from card headers or image alt attributes
     const rawTitle = 
       container.querySelector('h2, h3, h4, [class*="title"], [class*="name"]')?.textContent?.trim() ||
       container.querySelector('img')?.alt?.trim() ||
@@ -36,9 +48,9 @@ function scrapeCatalog(): DownloadItem[] {
 
     const title = sanitizeFilename(rawTitle);
 
-    // Extract competency / category if present, or fallback to 'General'
-    const rawCategory = container.querySelector('[class*="category"], [class*="competency"], [class*="subject"]')?.textContent?.trim() || 'General';
-    const category = sanitizeFilename(rawCategory);
+    // Look for item-level category tag first, fallback to URL/Page competency
+    const cardCategory = container.querySelector('.category-tag, .competency-tag, [class*="subject"]')?.textContent?.trim();
+    const category = sanitizeFilename(cardCategory || pageCompetency);
 
     itemMap.set(href, {
       id: `${type}-${index}-${Date.now()}`,
@@ -62,11 +74,7 @@ function scrapeCatalog(): DownloadItem[] {
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
   if (message.type === 'START_SCRAPE') {
-    console.log('[Summary.com Content Script] Starting scan...');
     const catalog = scrapeCatalog();
-
-    console.log(`[Summary.com Content Script] Scraped ${catalog.length} items from page.`);
-
     chrome.storage.local.get(['catalogItems'], (result) => {
       const existingItems = (result.catalogItems || []) as DownloadItem[];
       const itemMap = new Map<string, DownloadItem>();
@@ -80,7 +88,6 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
         sendResponse({ success: true, count: mergedCatalog.length, items: mergedCatalog });
       });
     });
-
     return true;
   }
 });
