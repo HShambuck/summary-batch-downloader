@@ -7,6 +7,7 @@ interface Props {
   setFilter: React.Dispatch<React.SetStateAction<DownloadFilter>>;
   onStartBatch: () => void;
   onStopBatch: () => void;
+  onStartScrape: () => void;
   isRunning: boolean;
 }
 
@@ -16,6 +17,7 @@ export const SidebarFilter: React.FC<Props> = ({
   setFilter,
   onStartBatch,
   onStopBatch,
+  onStartScrape,
   isRunning,
 }) => {
   const toggleCompetency = (compName: string) => {
@@ -217,6 +219,21 @@ export const SidebarFilter: React.FC<Props> = ({
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        <button
+          onClick={onStartScrape}
+          style={{
+            width: "100%",
+            padding: "12px",
+            background: "#059669", // Emerald Green
+            color: "#fff",
+            border: "none",
+            borderRadius: "6px",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Scan Page / Fetch Summaries
+        </button>
         {!isRunning ? (
           <button
             onClick={onStartBatch}

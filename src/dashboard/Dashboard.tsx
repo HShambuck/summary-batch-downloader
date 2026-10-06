@@ -124,6 +124,7 @@ const handleStartScrape = () => {
         setFilter={setFilter}
         onStartBatch={handleStartBatch}
         onStopBatch={handleStopBatch}
+        onStartScrape={handleStartScrape}
         isRunning={isRunning}
       />
 
