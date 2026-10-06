@@ -1,121 +1,60 @@
 import type { DownloadItem, ExtensionMessage } from '../types';
 
-console.log('[Summary.com Content Script] Soundview Scraper loaded...');
+console.log('[Summary.com Content Script] Targeted Scraper loaded...');
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '').trim();
 }
 
-/**
- * Extracts book summaries and webinars matching Soundview's DOM structure.
- */
 function scrapeCatalog(): DownloadItem[] {
   const itemMap = new Map<string, DownloadItem>();
 
-  // --- 1. Detail Page Scraper (Single Book Summary or Webinar page) ---
-  const pageTitleEl = document.querySelector('h1, .summary-title, .webinar-title');
-  const categoryTag = document.querySelector('.category-tag, .meta-category, label, span[style*="uppercase"]')?.textContent?.trim() || 'General';
-  
-  // PDF download links on detail pages (e.g., Download PDF buttons or action dropdowns)
-  const pdfDownloadLinks = Array.from(
-    document.querySelectorAll<HTMLAnchorElement>(
-      'a[href*=".pdf"], a[href*="/download/"], a[data-download-type="pdf"], a.download-button, a[href*="summary-download"]'
-    )
-  );
+  // 1. Target Soundview's specific catalog card items and links
+  const cardElements = Array.from(document.querySelectorAll('a[href*="/book-summary/"], a[href*="/webinars/"], a[href*="/webinar/"]'));
 
-  pdfDownloadLinks.forEach((link, idx) => {
-    const href = link.href;
-    if (href && !itemMap.has(href)) {
-      const rawTitle = pageTitleEl?.textContent?.trim() || document.title.split('|')[0].trim() || `Summary ${idx + 1}`;
-      const title = sanitizeFilename(rawTitle);
-      const cat = sanitizeFilename(categoryTag);
+  cardElements.forEach((el, index) => {
+    const anchor = el as HTMLAnchorElement;
+    const href = anchor.href;
+    if (!href || itemMap.has(href)) return;
 
-      itemMap.set(href, {
-        id: `summary-detail-${idx}-${Date.now()}`,
-        title,
-        authorOrSpeaker: 'Soundview Author',
-        type: 'summary',
-        contentType: 'summary',
-        category: cat,
-        competency: cat,
-        downloadUrl: href,
-        pdfUrl: href,
-        fileType: 'pdf',
-        status: 'pending',
-        filename: `Summaries/${cat}/${title}.pdf`
-      });
-    }
-  });
+    // Determine type from URL path
+    const isWebinar = href.includes('/webinar');
+    const type: 'summary' | 'webinar' = isWebinar ? 'webinar' : 'summary';
+    const fileType: 'pdf' | 'mp3' = isWebinar ? 'mp3' : 'pdf';
 
-  // MP3 / Webinar audio links on detail pages
-  const mp3DownloadLinks = Array.from(
-    document.querySelectorAll<HTMLAnchorElement>(
-      'a[href*=".mp3"], a[href*="/audio/"], a[data-download-type="mp3"], a[href*="webinar-download"]'
-    )
-  );
+    // Find the enclosing card container to locate the title text and author
+    const container = anchor.closest('div, article, li') || anchor;
+    
+    // Extract title text from card headers or image alt attributes
+    const rawTitle = 
+      container.querySelector('h2, h3, h4, [class*="title"], [class*="name"]')?.textContent?.trim() ||
+      container.querySelector('img')?.alt?.trim() ||
+      anchor.textContent?.trim() ||
+      '';
 
-  mp3DownloadLinks.forEach((link, idx) => {
-    const href = link.href;
-    if (href && !itemMap.has(href)) {
-      const rawTitle = pageTitleEl?.textContent?.trim() || document.title.split('|')[0].trim() || `Webinar ${idx + 1}`;
-      const title = sanitizeFilename(rawTitle);
-      const cat = sanitizeFilename(categoryTag);
+    if (!rawTitle || rawTitle.length < 2) return;
 
-      itemMap.set(href, {
-        id: `webinar-detail-${idx}-${Date.now()}`,
-        title,
-        authorOrSpeaker: 'Soundview Speaker',
-        type: 'webinar',
-        contentType: 'webinar',
-        category: cat,
-        competency: cat,
-        downloadUrl: href,
-        mp3Url: href,
-        fileType: 'mp3',
-        status: 'pending',
-        filename: `Webinars/${cat}/${title}.mp3`
-      });
-    }
-  });
+    const title = sanitizeFilename(rawTitle);
 
-  // --- 2. Catalog / Grid List Page Scraper ---
-  // Soundview catalog cards typically use article cards or grid items
-  const catalogCards = document.querySelectorAll(
-    'article, .card, .book-card, .webinar-card, .catalog-item, div[class*="summary"], div[class*="webinar"]'
-  );
+    // Extract competency / category if present, or fallback to 'General'
+    const rawCategory = container.querySelector('[class*="category"], [class*="competency"], [class*="subject"]')?.textContent?.trim() || 'General';
+    const category = sanitizeFilename(rawCategory);
 
-  catalogCards.forEach((card, index) => {
-    const titleEl = card.querySelector('h2, h3, h4, .title, a[href*="/book-summary/"], a[href*="/webinar/"]');
-    const categoryEl = card.querySelector('.category, .tag, label, span');
-    const pdfLink = card.querySelector<HTMLAnchorElement>('a[href*=".pdf"], a[href*="/download/"]');
-    const mp3Link = card.querySelector<HTMLAnchorElement>('a[href*=".mp3"], a[href*="/audio/"]');
-    const detailLink = card.querySelector<HTMLAnchorElement>('a[href*="/book-summary/"], a[href*="/webinar/"]');
-
-    const title = sanitizeFilename(titleEl?.textContent?.trim() || `Item ${index + 1}`);
-    const category = sanitizeFilename(categoryEl?.textContent?.trim() || 'General');
-    const targetUrl = pdfLink?.href || mp3Link?.href || detailLink?.href;
-
-    if (targetUrl && !itemMap.has(targetUrl)) {
-      const isWebinar = targetUrl.includes('/webinar') || targetUrl.includes('.mp3');
-      const fileType = isWebinar ? 'mp3' : 'pdf';
-      const contentType = isWebinar ? 'webinar' : 'summary';
-
-      itemMap.set(targetUrl, {
-        id: `${contentType}-${index}-${Date.now()}`,
-        title,
-        authorOrSpeaker: 'Soundview Executive',
-        type: contentType,
-        contentType,
-        category,
-        competency: category,
-        downloadUrl: targetUrl,
-        pdfUrl: isWebinar ? undefined : targetUrl,
-        mp3Url: isWebinar ? targetUrl : undefined,
-        fileType,
-        status: 'pending',
-        filename: `${isWebinar ? 'Webinars' : 'Summaries'}/${category}/${title}.${fileType}`
-      });
-    }
+    itemMap.set(href, {
+      id: `${type}-${index}-${Date.now()}`,
+      title,
+      authorOrSpeaker: 'Soundview Executive',
+      type,
+      contentType: type,
+      category,
+      competency: category,
+      downloadUrl: href,
+      pdfUrl: type === 'summary' ? href : undefined,
+      mp3Url: type === 'webinar' ? href : undefined,
+      fileType,
+      status: 'pending',
+      filename: `${type === 'webinar' ? 'Webinars' : 'Summaries'}/${category}/${title}.${fileType}`
+    });
   });
 
   return Array.from(itemMap.values());
@@ -123,8 +62,10 @@ function scrapeCatalog(): DownloadItem[] {
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
   if (message.type === 'START_SCRAPE') {
-    console.log('[Summary.com Content Script] Scanning Soundview catalog/page...');
+    console.log('[Summary.com Content Script] Starting scan...');
     const catalog = scrapeCatalog();
+
+    console.log(`[Summary.com Content Script] Scraped ${catalog.length} items from page.`);
 
     chrome.storage.local.get(['catalogItems'], (result) => {
       const existingItems = (result.catalogItems || []) as DownloadItem[];
@@ -140,6 +81,6 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
       });
     });
 
-    return true; // Keep channel open for async response
+    return true;
   }
 });
