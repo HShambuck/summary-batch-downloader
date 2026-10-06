@@ -1,5 +1,5 @@
 import React from "react";
-import { DownloadFilter } from "../types";
+import type { DownloadFilter } from "../types";
 
 interface Props {
   competencies: { name: string; count: number }[];

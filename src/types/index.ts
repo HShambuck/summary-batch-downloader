@@ -1,4 +1,4 @@
-export type ContentType = 'summary' | 'webinar';
+export type ContentType = 'summary' | 'webinar' | 'all';
 export type DownloadStatus = 'pending' | 'downloading' | 'completed' | 'failed' | 'skipped';
 
 export interface DownloadItem {
@@ -6,12 +6,12 @@ export interface DownloadItem {
   title: string;
   authorOrSpeaker?: string;
   type: ContentType;
-  contentType?: ContentType; // Alias for UI backwards compatibility
-  category: string;         // Serves as competency for summaries, topic for webinars
-  competency?: string;      // Alias for UI backwards compatibility
-  downloadUrl: string;      // Direct PDF or MP3 URL
-  pdfUrl?: string;          // Helper property for UI
-  mp3Url?: string;          // Helper property for UI
+  contentType?: ContentType;
+  category: string;
+  competency: string; // Required for indexing and filtering
+  downloadUrl: string;
+  pdfUrl?: string;
+  mp3Url?: string;
   fileType: 'pdf' | 'mp3';
   status: DownloadStatus;
   progress?: number;
@@ -31,23 +31,31 @@ export interface LogEntry {
   id: string;
   timestamp: string;
   message: string;
-  level: 'info' | 'warn' | 'error' | 'success';
-  type?: 'info' | 'warn' | 'error' | 'success'; // Alias for UI backwards compatibility
+  level?: 'info' | 'warn' | 'error' | 'success';
+  type?: 'info' | 'warn' | 'error' | 'success';
 }
 
 export interface DownloadFilter {
-  type: ContentType | 'all';
+  selectedCompetencies: string[];
+  contentType: ContentType;
+  includePdf: boolean;
+  includeMp3: boolean;
+  skipDownloaded: boolean;
   searchQuery: string;
-  categories: string[];
-  status: DownloadStatus | 'all';
+  categories?: string[];
+  status?: DownloadStatus | 'all';
 }
 
 export interface StorageState {
-  catalogItems: CatalogItem[];
-  downloadQueue: DownloadItem[];
-  logs: LogEntry[];
-  isScrapeActive: boolean;
-  isDownloadActive: boolean;
+  catalog?: DownloadItem[];
+  catalogItems?: DownloadItem[];
+  downloadQueue?: DownloadItem[];
+  isRunning?: boolean;
+  isScrapeActive?: boolean;
+  isDownloadActive?: boolean;
+  completedCount?: number;
+  totalCount?: number;
+  logs?: LogEntry[];
 }
 
 export type ExtensionMessage =
