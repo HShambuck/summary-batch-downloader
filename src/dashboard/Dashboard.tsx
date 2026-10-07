@@ -84,10 +84,30 @@ const handleStartScrape = () => {
 
   // Filter catalog items
   const filteredCatalog = catalog.filter((item) => {
-    const matchesComp = filter.selectedCompetencies.length === 0 || filter.selectedCompetencies.includes(item.competency);
-    const matchesSearch = item.title.toLowerCase().includes(filter.searchQuery.toLowerCase());
-    return matchesComp && matchesSearch;
-  });
+  // 1. Asset Type Filter (PDF / MP3)
+  const matchesPdf = filter.includePdf && item.fileType === 'pdf';
+  const matchesMp3 = filter.includeMp3 && item.fileType === 'mp3';
+  if (!matchesPdf && !matchesMp3) return false;
+
+  // 2. Skip Downloaded Filter
+  if (filter.skipDownloaded && item.status === 'completed') return false;
+
+  // 3. Competency Filter
+  const matchesCompetency =
+    filter.selectedCompetencies.length === 0 ||
+    filter.selectedCompetencies.includes(item.competency || item.category || 'General');
+  if (!matchesCompetency) return false;
+
+  // 4. Search Query Filter
+  if (filter.searchQuery.trim() !== '') {
+    const query = filter.searchQuery.toLowerCase();
+    const titleMatch = item.title.toLowerCase().includes(query);
+    const categoryMatch = (item.competency || item.category || '').toLowerCase().includes(query);
+    return titleMatch || categoryMatch;
+  }
+
+  return true;
+});
 
   const handleToggleSelect = (id: string) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]));
