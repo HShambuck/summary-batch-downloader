@@ -1,31 +1,5 @@
-export type ContentType = 'summary' | 'webinar' | 'all';
-export type DownloadStatus = 'pending' | 'downloading' | 'completed' | 'failed' | 'skipped';
-
-export interface DownloadItem {
-  id: string;
-  title: string;
-  authorOrSpeaker?: string;
-  type: ContentType;
-  contentType?: ContentType;
-  category: string;
-  competency: string; // Required for indexing and filtering
-  downloadUrl: string;
-  pdfUrl?: string;
-  mp3Url?: string;
-  fileType: 'pdf' | 'mp3';
-  status: DownloadStatus;
-  progress?: number;
-  error?: string;
-  filename?: string;
-}
-
-export type CatalogItem = DownloadItem;
-
-export interface ScrapingProgress {
-  scrapedCount: number;
-  isScanning: boolean;
-  currentCategory?: string;
-}
+export type FileType = 'pdf' | 'mp3';
+export type ItemStatus = 'pending' | 'downloading' | 'completed' | 'failed';
 
 export interface LogEntry {
   id: string;
@@ -35,33 +9,38 @@ export interface LogEntry {
   type?: 'info' | 'warn' | 'error' | 'success';
 }
 
+export interface CatalogItem {
+  id: string; // Canonical URL
+  title: string;
+  authorOrSpeaker: string;
+  type: 'summary' | 'webinar';
+  categories: string[];
+  downloadUrl: string;
+  pdfUrl?: string;
+  mp3Url?: string;
+  fileType: FileType;
+  status: ItemStatus;
+}
+
+export type CatalogIndex = Record<string, CatalogItem>;
+
 export interface DownloadFilter {
-  selectedCompetencies: string[];
-  contentType: ContentType;
   includePdf: boolean;
   includeMp3: boolean;
   skipDownloaded: boolean;
+  selectedCompetencies: string[]; // <--- Matching SidebarFilter usage
   searchQuery: string;
-  categories?: string[];
-  status?: DownloadStatus | 'all';
 }
 
 export interface StorageState {
-  catalog?: DownloadItem[];
-  catalogItems?: DownloadItem[];
-  downloadQueue?: DownloadItem[];
+  catalogIndex?: CatalogIndex;
   isRunning?: boolean;
-  isScrapeActive?: boolean;
-  isDownloadActive?: boolean;
   completedCount?: number;
   totalCount?: number;
   logs?: LogEntry[];
 }
 
-export type ExtensionMessage =
-  | { type: 'START_SCRAPE' }
-  | { type: 'SCRAPE_COMPLETED'; payload: DownloadItem[] }
-  | { type: 'START_BATCH_DOWNLOAD'; payload: DownloadItem[] }
-  | { type: 'PAUSE_DOWNLOADS' }
-  | { type: 'CANCEL_DOWNLOADS' }
-  | { type: 'DOWNLOAD_PROGRESS'; payload: { id: string; status: DownloadStatus; progress: number; error?: string } };
+export interface ExtensionMessage {
+  type: 'START_SCRAPE' | 'START_BATCH' | 'PAUSE_BATCH';
+  payload?: any;
+}
