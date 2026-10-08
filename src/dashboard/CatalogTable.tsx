@@ -1,5 +1,5 @@
 import React from 'react';
-import type { CatalogItem, ItemStatus } from '../types';
+import type { CatalogItem} from '../types';
 
 interface CatalogTableProps {
   items: CatalogItem[];
@@ -16,20 +16,6 @@ export const CatalogTable: React.FC<CatalogTableProps> = ({
 }) => {
   const allSelected = items.length > 0 && items.every((item) => selectedIds.includes(item.id));
 
-  const getStatusBadge = (status: ItemStatus) => {
-    switch (status) {
-      case 'completed':
-        return <span style={{ padding: '2px 8px', borderRadius: '4px', backgroundColor: '#065f46', color: '#34d399', fontSize: '11px' }}>Completed</span>;
-      case 'downloading':
-        return <span style={{ padding: '2px 8px', borderRadius: '4px', backgroundColor: '#1e40af', color: '#60a5fa', fontSize: '11px' }}>Downloading</span>;
-      case 'failed':
-        return <span style={{ padding: '2px 8px', borderRadius: '4px', backgroundColor: '#991b1b', color: '#f87171', fontSize: '11px' }}>Failed</span>;
-      case 'skipped':
-        return <span style={{ padding: '2px 8px', borderRadius: '4px', backgroundColor: '#92400e', color: '#fbbf24', fontSize: '11px' }}>Skipped</span>;
-      default:
-        return <span style={{ padding: '2px 8px', borderRadius: '4px', backgroundColor: '#334155', color: '#94a3b8', fontSize: '11px' }}>Pending</span>;
-    }
-  };
 
   return (
     <div style={{ overflowX: 'auto', width: '100%' }}>
@@ -66,7 +52,7 @@ export const CatalogTable: React.FC<CatalogTableProps> = ({
                   <td style={{ padding: '10px 8px', fontWeight: 500, color: '#f8fafc' }}>{item.title}</td>
                   <td style={{ padding: '10px 8px', color: '#cbd5e1' }}>{displayCategory}</td>
                   <td style={{ padding: '10px 8px', color: '#94a3b8', textTransform: 'uppercase', fontSize: '11px' }}>{displayType}</td>
-                  <td style={{ padding: '10px 8px' }}>{getStatusBadge(item.status)}</td>
+                  <td style={{ padding: '10px 8px' }}><StatusBadge status={item.status} /></td>
                 </tr>
               );
             })

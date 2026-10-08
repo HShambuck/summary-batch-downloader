@@ -66,7 +66,7 @@ export const Dashboard: React.FC = () => {
 
       const targetTabId = tabs[0].id;
       if (targetTabId) {
-        chrome.tabs.sendMessage(targetTabId, { type: "START_SCRAPE" }, (response) => {
+        chrome.tabs.sendMessage(targetTabId, { type: "START_SCRAPE" }, () => {
           if (chrome.runtime.lastError) {
             console.error("Scan error:", chrome.runtime.lastError.message);
           }
