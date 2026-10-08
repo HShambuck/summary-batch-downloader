@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import type { DownloadFilter } from '../types';
 
 interface CompetencyItem {
@@ -16,6 +16,14 @@ interface SidebarFilterProps {
   isRunning: boolean;
 }
 
+const CheckIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+    <path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const SEARCH_THRESHOLD = 8;
+
 export const SidebarFilter: React.FC<SidebarFilterProps> = ({
   filter,
   setFilter,
@@ -25,261 +33,157 @@ export const SidebarFilter: React.FC<SidebarFilterProps> = ({
   onStopBatch,
   isRunning,
 }) => {
+  const [compQuery, setCompQuery] = useState('');
+  const selected = filter.selectedCompetencies || [];
+
+  const visibleCompetencies = useMemo(() => {
+    const q = compQuery.trim().toLowerCase();
+    return q ? competencies.filter((c) => c.name.toLowerCase().includes(q)) : competencies;
+  }, [competencies, compQuery]);
+
   const selectAllCompetencies = () => {
-    setFilter((prev) => ({
-      ...prev,
-      selectedCompetencies: competencies.map((c) => c.name),
-      selectedCategories: competencies.map((c) => c.name),
-    }));
+    const names = competencies.map((c) => c.name);
+    setFilter((prev) => ({ ...prev, selectedCompetencies: names, selectedCategories: names }));
   };
 
   const clearCompetencies = () => {
-    setFilter((prev) => ({
-      ...prev,
-      selectedCompetencies: [],
-      selectedCategories: [],
-    }));
+    setFilter((prev) => ({ ...prev, selectedCompetencies: [], selectedCategories: [] }));
   };
 
   const toggleCompetency = (name: string) => {
     setFilter((prev) => {
       const current = prev.selectedCompetencies || [];
-      const exists = current.includes(name);
-      const updated = exists ? current.filter((c) => c !== name) : [...current, name];
-      return {
-        ...prev,
-        selectedCompetencies: updated,
-        selectedCategories: updated,
-      };
+      const updated = current.includes(name) ? current.filter((c) => c !== name) : [...current, name];
+      return { ...prev, selectedCompetencies: updated, selectedCategories: updated };
     });
   };
 
   return (
-    <aside
-      style={{
-        width: "280px",
-        background: "#ffffff",
-        borderRight: "1px solid #e2e8f0",
-        padding: "20px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "20px",
-      }}
-    >
-      <div>
-        <h3
-          style={{
-            margin: "0 0 12px 0",
-            fontSize: "14px",
-            color: "#475569",
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-          }}
-        >
-          Asset Types
-        </h3>
-        <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            marginBottom: "8px",
-            fontSize: "14px",
-            cursor: "pointer",
-            color: "#1e293b",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={filter.includePdf}
-            onChange={(e) =>
-              setFilter((prev) => ({ ...prev, includePdf: e.target.checked }))
-            }
-          />
-          📄 PDF Summaries
-        </label>
-        <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            marginBottom: "8px",
-            fontSize: "14px",
-            cursor: "pointer",
-            color: "#1e293b",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={filter.includeMp3}
-            onChange={(e) =>
-              setFilter((prev) => ({ ...prev, includeMp3: e.target.checked }))
-            }
-          />
-          🎧 MP3 Audiobooks
-        </label>
-        <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            fontSize: "14px",
-            cursor: "pointer",
-            marginTop: "12px",
-            color: "#0284c7",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={filter.skipDownloaded}
-            onChange={(e) =>
-              setFilter((prev) => ({
-                ...prev,
-                skipDownloaded: e.target.checked,
-              }))
-            }
-          />
-          🛡️ Skip Already Downloaded
-        </label>
+    <aside className="sv-sidebar">
+      <div className="sv-brand">
+        <div className="sv-brand-mark" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M4 20h16" />
+          </svg>
+        </div>
+        <div>
+          <div className="sv-brand-name">Summary Downloader</div>
+          <div className="sv-brand-sub">Soundview library</div>
+        </div>
       </div>
 
-      <hr
-        style={{ border: "none", borderTop: "1px solid #e2e8f0", margin: 0 }}
-      />
-
-      <div style={{ flex: 1, overflowY: "auto" }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "8px",
-          }}
-        >
-          <h3
-            style={{
-              margin: 0,
-              fontSize: "14px",
-              color: "#475569",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-            }}
-          >
-            Competencies
-          </h3>
-          <div style={{ fontSize: "12px" }}>
-            <span
-              onClick={selectAllCompetencies}
-              style={{
-                color: "#2563eb",
-                cursor: "pointer",
-                marginRight: "8px",
-              }}
-            >
-              All
-            </span>
-            <span
-              onClick={clearCompetencies}
-              style={{ color: "#64748b", cursor: "pointer" }}
-            >
-              None
-            </span>
+      <div className="sv-sidebar-body">
+        <section>
+          <div className="sv-section-head">
+            <h3 className="sv-section-title">File types</h3>
           </div>
-        </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-          {competencies.map((comp) => {
-            const selectedList = filter.selectedCompetencies || [];
-            const isSelected = selectedList.includes(comp.name);
-            return (
-              <label
-                key={comp.name}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  fontSize: "13px",
-                  padding: "6px 8px",
-                  borderRadius: "4px",
-                  background: isSelected ? "#eff6ff" : "transparent",
-                  color: "#1e293b",
-                  cursor: "pointer",
-                }}
-              >
-                <div
-                  style={{ display: "flex", alignItems: "center", gap: "8px" }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => toggleCompetency(comp.name)}
-                  />
-                  <span>{comp.name}</span>
-                </div>
-                <span
-                  style={{
-                    fontSize: "11px",
-                    background: "#f1f5f9",
-                    padding: "2px 6px",
-                    borderRadius: "10px",
-                    color: "#64748b",
-                  }}
-                >
-                  {comp.count}
-                </span>
-              </label>
-            );
-          })}
-        </div>
+          <div className="sv-toggle-group">
+            <label className={`sv-toggle ${filter.includePdf ? 'is-on' : ''}`}>
+              <input
+                type="checkbox"
+                checked={filter.includePdf}
+                onChange={(e) => setFilter((prev) => ({ ...prev, includePdf: e.target.checked }))}
+              />
+              <span className="sv-toggle-box"><CheckIcon /></span>
+              <span className="sv-toggle-text">
+                <span className="sv-toggle-label">PDF summaries</span>
+                <span className="sv-toggle-desc">Written summaries</span>
+              </span>
+            </label>
+
+            <label className={`sv-toggle ${filter.includeMp3 ? 'is-on' : ''}`}>
+              <input
+                type="checkbox"
+                checked={filter.includeMp3}
+                onChange={(e) => setFilter((prev) => ({ ...prev, includeMp3: e.target.checked }))}
+              />
+              <span className="sv-toggle-box"><CheckIcon /></span>
+              <span className="sv-toggle-text">
+                <span className="sv-toggle-label">MP3 audiobooks</span>
+                <span className="sv-toggle-desc">Audio versions</span>
+              </span>
+            </label>
+          </div>
+
+          <label className="sv-switch-row" style={{ position: 'relative' }}>
+            <span>Skip already downloaded</span>
+            <input
+              type="checkbox"
+              checked={filter.skipDownloaded}
+              onChange={(e) => setFilter((prev) => ({ ...prev, skipDownloaded: e.target.checked }))}
+            />
+            <span className="sv-switch" aria-hidden="true" />
+          </label>
+        </section>
+
+        <section>
+          <div className="sv-section-head">
+            <h3 className="sv-section-title">Competencies</h3>
+            <div>
+              <button type="button" className="sv-link-btn" onClick={selectAllCompetencies}>Select all</button>
+              <button type="button" className="sv-link-btn is-quiet" onClick={clearCompetencies}>Clear</button>
+            </div>
+          </div>
+          <p className="sv-hint">
+            {selected.length === 0
+              ? 'None selected — showing every competency.'
+              : `${selected.length} of ${competencies.length} selected.`}
+          </p>
+
+          {competencies.length > SEARCH_THRESHOLD && (
+            <input
+              type="search"
+              className="sv-comp-search"
+              placeholder="Find a competency"
+              value={compQuery}
+              onChange={(e) => setCompQuery(e.target.value)}
+              aria-label="Find a competency"
+            />
+          )}
+
+          {competencies.length === 0 ? (
+            <div className="sv-empty-note">Competencies appear here after you scan the page.</div>
+          ) : visibleCompetencies.length === 0 ? (
+            <div className="sv-empty-note">No competency matches “{compQuery}”.</div>
+          ) : (
+            <div className="sv-comp-list">
+              {visibleCompetencies.map((comp) => {
+                const isSelected = selected.includes(comp.name);
+                return (
+                  <label key={comp.name} className={`sv-comp-row ${isSelected ? 'is-on' : ''}`}>
+                    <span className="sv-comp-name">
+                      <input type="checkbox" checked={isSelected} onChange={() => toggleCompetency(comp.name)} />
+                      <span title={comp.name}>{comp.name}</span>
+                    </span>
+                    <span className="sv-count">{comp.count}</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </section>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-        <button
-          onClick={onStartScrape}
-          style={{
-            width: "100%",
-            padding: "12px",
-            background: "#059669",
-            color: "#fff",
-            border: "none",
-            borderRadius: "6px",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          Scan Page / Fetch Summaries
+      <div className="sv-sidebar-foot">
+        {isRunning && (
+          <div className="sv-running" role="status">
+            <span className="sv-status-downloading sv-status" style={{ padding: 0, background: 'none' }}>
+              <i />
+            </span>
+            Download batch running
+          </div>
+        )}
+        <button type="button" className="sv-btn sv-btn-secondary" onClick={onStartScrape}>
+          Scan page for summaries
         </button>
         {!isRunning ? (
-          <button
-            onClick={onStartBatch}
-            style={{
-              width: "100%",
-              padding: "12px",
-              background: "#2563eb",
-              color: "#fff",
-              border: "none",
-              borderRadius: "6px",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            Start Download Batch
+          <button type="button" className="sv-btn sv-btn-primary" onClick={onStartBatch}>
+            Start download batch
           </button>
         ) : (
-          <button
-            onClick={onStopBatch}
-            style={{
-              width: "100%",
-              padding: "12px",
-              background: "#ef4444",
-              color: "#fff",
-              border: "none",
-              borderRadius: "6px",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            Pause Download Batch
+          <button type="button" className="sv-btn sv-btn-danger" onClick={onStopBatch}>
+            Pause download batch
           </button>
         )}
       </div>

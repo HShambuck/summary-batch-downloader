@@ -1,58 +1,116 @@
-import React from 'react';
-import type { CatalogItem} from '../types';
+import React, { useEffect, useRef } from 'react';
+import type { CatalogItem } from '../types';
 
 interface CatalogTableProps {
   items: CatalogItem[];
   selectedIds?: string[];
   onToggleSelect?: (id: string) => void;
   onToggleSelectAll?: () => void;
+  /** True when the catalog has items but filters hide all of them. */
+  hasCatalog?: boolean;
 }
+
+const MAX_VISIBLE_TAGS = 2;
 
 export const CatalogTable: React.FC<CatalogTableProps> = ({
   items,
   selectedIds = [],
   onToggleSelect = () => {},
   onToggleSelectAll = () => {},
+  hasCatalog = false,
 }) => {
-  const allSelected = items.length > 0 && items.every((item) => selectedIds.includes(item.id));
+  const headerCheckbox = useRef<HTMLInputElement>(null);
 
+  const selectedInView = items.filter((item) => selectedIds.includes(item.id)).length;
+  const allSelected = items.length > 0 && selectedInView === items.length;
+  const someSelected = selectedInView > 0 && !allSelected;
+
+  useEffect(() => {
+    if (headerCheckbox.current) headerCheckbox.current.indeterminate = someSelected;
+  }, [someSelected]);
 
   return (
-    <div style={{ overflowX: 'auto', width: '100%' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+    <div className="sv-table-scroll">
+      <table className="sv-table">
         <thead>
-          <tr style={{ borderBottom: '1px solid #334155', color: '#94a3b8' }}>
-            <th style={{ padding: '12px 8px', width: '36px' }}>
-              <input type="checkbox" checked={allSelected} onChange={onToggleSelectAll} />
+          <tr>
+            <th className="sv-col-check">
+              <input
+                ref={headerCheckbox}
+                type="checkbox"
+                checked={allSelected}
+                onChange={onToggleSelectAll}
+                aria-label="Select all visible items"
+                disabled={items.length === 0}
+              />
             </th>
-            <th style={{ padding: '12px 8px' }}>Title</th>
-            <th style={{ padding: '12px 8px' }}>Competency / Category</th>
-            <th style={{ padding: '12px 8px' }}>Type</th>
-            <th style={{ padding: '12px 8px' }}>Status</th>
+            <th>Title</th>
+            <th>Competency</th>
+            <th>Type</th>
+            <th>Status</th>
           </tr>
         </thead>
         <tbody>
           {items.length === 0 ? (
             <tr>
-              <td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
-                No catalog items found. Click "Scan Page / Fetch Summaries" to begin.
+              <td colSpan={5} style={{ cursor: 'default' }}>
+                <div className="sv-empty">
+                  {hasCatalog ? (
+                    <>
+                      <h4>No items match your filters</h4>
+                      <p>Try clearing the search or turning off “Skip already downloaded”.</p>
+                    </>
+                  ) : (
+                    <>
+                      <h4>Your catalog is empty</h4>
+                      <p>Open summary.com in another tab, then choose “Scan page for summaries”.</p>
+                    </>
+                  )}
+                </div>
               </td>
             </tr>
           ) : (
             items.map((item) => {
-              const displayCategory = item.categories?.length ? item.categories.join(', ') : item.competency || 'General';
-              const displayType = item.type || item.contentType || 'summary';
+              const categories = item.categories?.length
+                ? item.categories
+                : [item.competency || 'General'];
+              const shown = categories.slice(0, MAX_VISIBLE_TAGS);
+              const hidden = categories.length - shown.length;
+              const displayType = String(item.fileType || item.type || item.contentType || 'summary');
+              const typeClass =
+                displayType === 'pdf' ? 'sv-type-pdf' : displayType === 'mp3' ? 'sv-type-mp3' : 'sv-type-other';
               const isSelected = selectedIds.includes(item.id);
 
               return (
-                <tr key={item.id} style={{ borderBottom: '1px solid #1e293b', backgroundColor: isSelected ? '#1e293b' : 'transparent' }}>
-                  <td style={{ padding: '10px 8px' }}>
-                    <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(item.id)} />
+                <tr
+                  key={item.id}
+                  className={isSelected ? 'is-selected' : ''}
+                  onClick={() => onToggleSelect(item.id)}
+                >
+                  <td className="sv-col-check">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => onToggleSelect(item.id)}
+                      aria-label={`Select ${item.title}`}
+                    />
                   </td>
-                  <td style={{ padding: '10px 8px', fontWeight: 500, color: '#f8fafc' }}>{item.title}</td>
-                  <td style={{ padding: '10px 8px', color: '#cbd5e1' }}>{displayCategory}</td>
-                  <td style={{ padding: '10px 8px', color: '#94a3b8', textTransform: 'uppercase', fontSize: '11px' }}>{displayType}</td>
-                  <td style={{ padding: '10px 8px' }}><StatusBadge status={item.status} /></td>
+                  <td className="sv-cell-title">{item.title}</td>
+                  <td>
+                    <div className="sv-tags" title={categories.join(', ')}>
+                      {shown.map((c) => (
+                        <span key={c} className="sv-tag">{c}</span>
+                      ))}
+                      {hidden > 0 && <span className="sv-tag">+{hidden}</span>}
+                    </div>
+                  </td>
+                  <td>
+                    <span className={`sv-type ${typeClass}`}>{displayType.toUpperCase()}</span>
+                  </td>
+                  <td>
+                    <StatusBadge status={item.status} />
+                  </td>
                 </tr>
               );
             })
@@ -63,34 +121,20 @@ export const CatalogTable: React.FC<CatalogTableProps> = ({
   );
 };
 
-const StatusBadge: React.FC<{ status: CatalogItem["status"] }> = ({
-  status,
-}) => {
-  const styles: Record<
-    CatalogItem["status"],
-    { bg: string; text: string; label: string }
-  > = {
-    pending: { bg: "#f1f5f9", text: "#64748b", label: "Pending" },
-    downloading: { bg: "#dbeafe", text: "#1d4ed8", label: "Downloading..." },
-    completed: { bg: "#dcfce7", text: "#15803d", label: "Completed" },
-    failed: { bg: "#fee2e2", text: "#b91c1c", label: "Failed" },
-    skipped: { bg: "#f3f4f6", text: "#9ca3af", label: "Skipped" },
-  };
+const STATUS_LABELS: Record<CatalogItem['status'], string> = {
+  pending: 'Pending',
+  downloading: 'Downloading',
+  completed: 'Completed',
+  failed: 'Failed',
+  skipped: 'Skipped',
+};
 
-  const style = styles[status] || styles.pending;
-
+const StatusBadge: React.FC<{ status: CatalogItem['status'] }> = ({ status }) => {
+  const key = STATUS_LABELS[status] ? status : 'pending';
   return (
-    <span
-      style={{
-        padding: "4px 8px",
-        borderRadius: "4px",
-        background: style.bg,
-        color: style.text,
-        fontWeight: 600,
-        fontSize: "11px",
-      }}
-    >
-      {style.label}
+    <span className={`sv-status sv-status-${key}`}>
+      <i />
+      {STATUS_LABELS[key]}
     </span>
   );
 };

@@ -2,13 +2,15 @@ import React, { useState, useEffect, useMemo } from 'react';
 import type { CatalogIndex, DownloadFilter, StorageState, LogEntry } from '../types';
 import { SidebarFilter } from './SidebarFilter';
 import { CatalogTable } from './CatalogTable';
-import { ConsoleLog } from './ConsoleLog'; // Corrected import name
+import { ConsoleLog } from './ConsoleLog';
+import './dashboard.css';
 
 export const Dashboard: React.FC = () => {
   const [catalogIndex, setCatalogIndex] = useState<CatalogIndex>({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
   const [filter, setFilter] = useState<DownloadFilter>({
     includePdf: true,
     includeMp3: true,
@@ -20,7 +22,7 @@ export const Dashboard: React.FC = () => {
 
   const catalogList = useMemo(() => Object.values(catalogIndex), [catalogIndex]);
 
-  // Compute competencies list with counts for SidebarFilter
+  // Competencies with counts, largest first
   const competenciesList = useMemo(() => {
     const counts: Record<string, number> = {};
     catalogList.forEach((item) => {
@@ -29,7 +31,9 @@ export const Dashboard: React.FC = () => {
         counts[tag] = (counts[tag] || 0) + 1;
       });
     });
-    return Object.entries(counts).map(([name, count]) => ({ name, count }));
+    return Object.entries(counts)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [catalogList]);
 
   useEffect(() => {
@@ -56,14 +60,15 @@ export const Dashboard: React.FC = () => {
   }, []);
 
   const handleStartScrape = () => {
-    chrome.tabs.query({ url: "*://*.summary.com/*" }, (tabs) => {
+    chrome.tabs.query({ url: '*://*.summary.com/*' }, (tabs) => {
       if (!tabs || tabs.length === 0) {
-        alert("Please open Soundview (summary.com) in another tab first!");
+        setNotice('Open summary.com in another tab, then scan again.');
         return;
       }
+      setNotice(null);
       const targetTabId = tabs[0]?.id;
       if (targetTabId) {
-        chrome.tabs.sendMessage(targetTabId, { type: "START_SCRAPE" });
+        chrome.tabs.sendMessage(targetTabId, { type: 'START_SCRAPE' });
       }
     });
   };
@@ -76,14 +81,12 @@ export const Dashboard: React.FC = () => {
 
       if (filter.skipDownloaded && item.status === 'completed') return false;
 
-      const activeCategories = filter.selectedCompetencies?.length > 0
-        ? filter.selectedCompetencies
-        : filter.selectedCategories;
+      const activeCategories =
+        filter.selectedCompetencies?.length > 0 ? filter.selectedCompetencies : filter.selectedCategories;
 
       if (activeCategories && activeCategories.length > 0) {
         const itemTags = item.categories && item.categories.length > 0 ? item.categories : ['General'];
-        const hasMatch = activeCategories.some((cat) => itemTags.includes(cat));
-        if (!hasMatch) return false;
+        if (!activeCategories.some((cat) => itemTags.includes(cat))) return false;
       }
 
       if (filter.searchQuery.trim() !== '') {
@@ -99,9 +102,7 @@ export const Dashboard: React.FC = () => {
   }, [catalogList, filter]);
 
   const handleToggleSelect = (id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
   };
 
   const handleToggleSelectAll = () => {
@@ -114,11 +115,14 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  const total = catalogList.length;
   const completedCount = catalogList.filter((i) => i.status === 'completed').length;
-  const progressPercent = catalogList.length > 0 ? Math.round((completedCount / catalogList.length) * 100) : 0;
+  const failedCount = catalogList.filter((i) => i.status === 'failed').length;
+  const completedPct = total > 0 ? (completedCount / total) * 100 : 0;
+  const failedPct = total > 0 ? (failedCount / total) * 100 : 0;
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc', color: '#0f172a' }}>
+    <div className="sv-app">
       <SidebarFilter
         filter={filter}
         setFilter={setFilter}
@@ -129,55 +133,80 @@ export const Dashboard: React.FC = () => {
         isRunning={isRunning}
       />
 
-      <main style={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <main className="sv-main">
+        <header className="sv-header">
           <div>
-            <h1 style={{ fontSize: '22px', fontWeight: 700, margin: 0, color: '#0f172a' }}>
-              Summary.com Downloader Dashboard
-            </h1>
-            <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0 0' }}>
-              Indexed items: {catalogList.length} | Displayed: {filteredCatalog.length} | Selected: {selectedIds.length}
+            <h1 className="sv-title">Download library</h1>
+            <p className="sv-meta">
+              <strong>{filteredCatalog.length}</strong> shown of <strong>{total}</strong> indexed
             </p>
           </div>
 
-          <input
-            type="text"
-            placeholder="Search titles..."
-            value={filter.searchQuery}
-            onChange={(e) => setFilter((prev) => ({ ...prev, searchQuery: e.target.value }))}
-            style={{
-              padding: '8px 14px',
-              borderRadius: '6px',
-              border: '1px solid #cbd5e1',
-              fontSize: '13px',
-              width: '240px',
-              outline: 'none',
-            }}
-          />
+          <div className="sv-search">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+            <input
+              type="search"
+              placeholder="Search titles or competencies"
+              aria-label="Search titles or competencies"
+              value={filter.searchQuery}
+              onChange={(e) => setFilter((prev) => ({ ...prev, searchQuery: e.target.value }))}
+            />
+          </div>
+        </header>
+
+        {notice && (
+          <div className="sv-notice" role="alert">
+            <span>{notice}</span>
+            <button type="button" onClick={() => setNotice(null)}>Dismiss</button>
+          </div>
+        )}
+
+        <section className="sv-panel sv-progress" aria-label="Batch progress">
+          <div className="sv-progress-head">
+            <b>Batch progress</b>
+            <span>
+              {completedCount} of {total} complete
+              {failedCount > 0 ? ` · ${failedCount} failed` : ''}
+            </span>
+          </div>
+          <div
+            className="sv-track"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(completedPct)}
+          >
+            <div className="sv-track-ok" style={{ width: `${completedPct}%` }} />
+            <div className="sv-track-err" style={{ width: `${failedPct}%` }} />
+          </div>
+        </section>
+
+        <div className="sv-selbar">
+          {selectedIds.length > 0 ? (
+            <>
+              <span><b>{selectedIds.length}</b> selected</span>
+              <button type="button" className="sv-link-btn" onClick={() => setSelectedIds([])}>
+                Clear selection
+              </button>
+            </>
+          ) : (
+            <span>Click a row to select it for download.</span>
+          )}
         </div>
 
-        {/* Batch Progress Bar Card */}
-        <div style={{ padding: '16px', backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>
-            <span>Batch Progress</span>
-            <span>{completedCount} / {catalogList.length} files ({progressPercent}%)</span>
-          </div>
-          <div style={{ height: '8px', width: '100%', backgroundColor: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${progressPercent}%`, backgroundColor: '#2563eb', transition: 'width 0.3s ease' }} />
-          </div>
-        </div>
-
-        {/* Catalog Table */}
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+        <div className="sv-panel sv-table-card">
           <CatalogTable
             items={filteredCatalog}
             selectedIds={selectedIds}
             onToggleSelect={handleToggleSelect}
             onToggleSelectAll={handleToggleSelectAll}
+            hasCatalog={total > 0}
           />
         </div>
 
-        {/* Console Log Component */}
         <ConsoleLog logs={logs} />
       </main>
     </div>
