@@ -4,6 +4,16 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '').trim();
 }
 
+function cleanTitle(rawTitle: string): string {
+  if (!rawTitle) return '';
+  // Splits out brief quote text leading up to " - Title by Author"
+  if (rawTitle.includes(' - ')) {
+    const parts = rawTitle.split(' - ');
+    return parts[parts.length - 1].trim();
+  }
+  return rawTitle.trim();
+}
+
 function extractActivePageCategory(): string | null {
   // Extract category from URL parameters (e.g., ?competence=accountability or ?category=leadership)
   const urlParams = new URLSearchParams(window.location.search);
@@ -43,13 +53,15 @@ function scrapeVisibleCatalog(): CatalogItem[] {
 
     if (!rawTitle || rawTitle.length < 2) return;
 
-    const title = sanitizeFilename(rawTitle);
+    // Isolate clean book title before sanitizing
+    const cleaned = cleanTitle(rawTitle);
+    const title = sanitizeFilename(cleaned);
     const author = container.querySelector('a[href*="/author/"], em + a, [class*="author"]')?.textContent?.trim() || 'Soundview Executive';
 
     // Look for explicit inline tag badge on card
     const inlineTag = container.querySelector('[class*="category"], [class*="competence"], [class*="tag"]')?.textContent?.trim();
     const categories: string[] = [];
-    
+
     if (inlineTag && inlineTag.length > 1) {
       categories.push(sanitizeFilename(inlineTag));
     } else if (pageCategory) {

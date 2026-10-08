@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import type { CatalogIndex, DownloadFilter, StorageState } from '../types';
+import type { CatalogIndex, DownloadFilter, StorageState, LogEntry } from '../types';
 import { SidebarFilter } from './SidebarFilter';
 import { CatalogTable } from './CatalogTable';
+import { ConsoleLog } from './ConsoleLog'; // Corrected import name
 
 export const Dashboard: React.FC = () => {
   const [catalogIndex, setCatalogIndex] = useState<CatalogIndex>({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState<boolean>(false);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [filter, setFilter] = useState<DownloadFilter>({
     includePdf: true,
     includeMp3: true,
@@ -18,38 +20,34 @@ export const Dashboard: React.FC = () => {
 
   const catalogList = useMemo(() => Object.values(catalogIndex), [catalogIndex]);
 
-  const categoryCounts = useMemo(() => {
-  const counts: Record<string, number> = {};
-  catalogList.forEach((item) => {
-    const tags = item.categories && item.categories.length > 0 ? item.categories : ['General'];
-    tags.forEach((tag) => {
-      counts[tag] = (counts[tag] || 0) + 1;
-    });
-  });
-  return counts;
-}, [catalogList]);
-
+  // Compute competencies list with counts for SidebarFilter
   const competenciesList = useMemo(() => {
-  return Object.entries(categoryCounts).map(([name, count]) => ({
-    name,
-    count,
-  }));
-}, [categoryCounts]);
+    const counts: Record<string, number> = {};
+    catalogList.forEach((item) => {
+      const tags = item.categories && item.categories.length > 0 ? item.categories : ['General'];
+      tags.forEach((tag) => {
+        counts[tag] = (counts[tag] || 0) + 1;
+      });
+    });
+    return Object.entries(counts).map(([name, count]) => ({ name, count }));
+  }, [catalogList]);
 
   useEffect(() => {
-    chrome.storage.local.get(['catalogIndex', 'isRunning'], (data: StorageState) => {
+    chrome.storage.local.get(['catalogIndex', 'isRunning', 'logs'], (data: StorageState) => {
       if (data.catalogIndex) setCatalogIndex(data.catalogIndex);
-      if (typeof data.isRunning === 'boolean') {
-        setIsRunning(data.isRunning);
-      }
+      if (typeof data.isRunning === 'boolean') setIsRunning(data.isRunning);
+      if (data.logs) setLogs(data.logs);
     });
 
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }) => {
-      if (changes.catalogIndex?.newValue) {
-        setCatalogIndex(changes.catalogIndex.newValue as CatalogIndex);
+      if (changes.catalogIndex?.newValue !== undefined) {
+        setCatalogIndex((changes.catalogIndex.newValue as CatalogIndex) || {});
       }
       if (changes.isRunning?.newValue !== undefined) {
         setIsRunning(Boolean(changes.isRunning.newValue));
+      }
+      if (changes.logs?.newValue !== undefined) {
+        setLogs((changes.logs.newValue as LogEntry[]) || []);
       }
     };
 
@@ -63,14 +61,9 @@ export const Dashboard: React.FC = () => {
         alert("Please open Soundview (summary.com) in another tab first!");
         return;
       }
-
-      const targetTabId = tabs[0].id;
+      const targetTabId = tabs[0]?.id;
       if (targetTabId) {
-        chrome.tabs.sendMessage(targetTabId, { type: "START_SCRAPE" }, () => {
-          if (chrome.runtime.lastError) {
-            console.error("Scan error:", chrome.runtime.lastError.message);
-          }
-        });
+        chrome.tabs.sendMessage(targetTabId, { type: "START_SCRAPE" });
       }
     });
   };
@@ -83,11 +76,11 @@ export const Dashboard: React.FC = () => {
 
       if (filter.skipDownloaded && item.status === 'completed') return false;
 
-      const activeCategories = (filter.selectedCategories && filter.selectedCategories.length > 0)
-        ? filter.selectedCategories 
-        : (filter.selectedCompetencies || []);
+      const activeCategories = filter.selectedCompetencies?.length > 0
+        ? filter.selectedCompetencies
+        : filter.selectedCategories;
 
-      if (activeCategories.length > 0) {
+      if (activeCategories && activeCategories.length > 0) {
         const itemTags = item.categories && item.categories.length > 0 ? item.categories : ['General'];
         const hasMatch = activeCategories.some((cat) => itemTags.includes(cat));
         if (!hasMatch) return false;
@@ -114,7 +107,6 @@ export const Dashboard: React.FC = () => {
   const handleToggleSelectAll = () => {
     const allFilteredIds = filteredCatalog.map((item) => item.id);
     const areAllSelected = allFilteredIds.every((id) => selectedIds.includes(id));
-
     if (areAllSelected) {
       setSelectedIds((prev) => prev.filter((id) => !allFilteredIds.includes(id)));
     } else {
@@ -122,29 +114,71 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  const completedCount = catalogList.filter((i) => i.status === 'completed').length;
+  const progressPercent = catalogList.length > 0 ? Math.round((completedCount / catalogList.length) * 100) : 0;
+
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#0f172a', color: '#f8fafc' }}>
+    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc', color: '#0f172a' }}>
       <SidebarFilter
         filter={filter}
         setFilter={setFilter}
-        categoryCounts={categoryCounts}
         competencies={competenciesList}
         onStartScrape={handleStartScrape}
         onStartBatch={() => setIsRunning(true)}
         onStopBatch={() => setIsRunning(false)}
         isRunning={isRunning}
       />
-      <main style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
-        <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px' }}>Catalog Dashboard</h1>
-        <p style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '16px' }}>
-          Total Items: {catalogList.length} | Displayed: {filteredCatalog.length} | Selected: {selectedIds.length}
-        </p>
-        <CatalogTable
-          items={filteredCatalog}
-          selectedIds={selectedIds}
-          onToggleSelect={handleToggleSelect}
-          onToggleSelectAll={handleToggleSelectAll}
-        />
+
+      <main style={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h1 style={{ fontSize: '22px', fontWeight: 700, margin: 0, color: '#0f172a' }}>
+              Summary.com Downloader Dashboard
+            </h1>
+            <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0 0' }}>
+              Indexed items: {catalogList.length} | Displayed: {filteredCatalog.length} | Selected: {selectedIds.length}
+            </p>
+          </div>
+
+          <input
+            type="text"
+            placeholder="Search titles..."
+            value={filter.searchQuery}
+            onChange={(e) => setFilter((prev) => ({ ...prev, searchQuery: e.target.value }))}
+            style={{
+              padding: '8px 14px',
+              borderRadius: '6px',
+              border: '1px solid #cbd5e1',
+              fontSize: '13px',
+              width: '240px',
+              outline: 'none',
+            }}
+          />
+        </div>
+
+        {/* Batch Progress Bar Card */}
+        <div style={{ padding: '16px', backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>
+            <span>Batch Progress</span>
+            <span>{completedCount} / {catalogList.length} files ({progressPercent}%)</span>
+          </div>
+          <div style={{ height: '8px', width: '100%', backgroundColor: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${progressPercent}%`, backgroundColor: '#2563eb', transition: 'width 0.3s ease' }} />
+          </div>
+        </div>
+
+        {/* Catalog Table */}
+        <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+          <CatalogTable
+            items={filteredCatalog}
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleSelect}
+            onToggleSelectAll={handleToggleSelectAll}
+          />
+        </div>
+
+        {/* Console Log Component */}
+        <ConsoleLog logs={logs} />
       </main>
     </div>
   );

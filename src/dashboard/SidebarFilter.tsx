@@ -1,5 +1,5 @@
-import React from "react";
-import type { DownloadFilter } from "../types";
+import React from 'react';
+import type { DownloadFilter } from '../types';
 
 interface CompetencyItem {
   name: string;
@@ -9,8 +9,7 @@ interface CompetencyItem {
 interface SidebarFilterProps {
   filter: DownloadFilter;
   setFilter: React.Dispatch<React.SetStateAction<DownloadFilter>>;
-  competencies?: CompetencyItem[]; 
-  categoryCounts?: Record<string, number>;
+  competencies?: CompetencyItem[];
   onStartScrape: () => void;
   onStartBatch: () => void;
   onStopBatch: () => void;
@@ -30,22 +29,27 @@ export const SidebarFilter: React.FC<SidebarFilterProps> = ({
     setFilter((prev) => ({
       ...prev,
       selectedCompetencies: competencies.map((c) => c.name),
+      selectedCategories: competencies.map((c) => c.name),
     }));
   };
 
   const clearCompetencies = () => {
-    setFilter((prev) => ({ ...prev, selectedCompetencies: [] }));
+    setFilter((prev) => ({
+      ...prev,
+      selectedCompetencies: [],
+      selectedCategories: [],
+    }));
   };
 
   const toggleCompetency = (name: string) => {
     setFilter((prev) => {
       const current = prev.selectedCompetencies || [];
       const exists = current.includes(name);
+      const updated = exists ? current.filter((c) => c !== name) : [...current, name];
       return {
         ...prev,
-        selectedCompetencies: exists
-          ? current.filter((c) => c !== name)
-          : [...current, name],
+        selectedCompetencies: updated,
+        selectedCategories: updated,
       };
     });
   };
@@ -82,6 +86,7 @@ export const SidebarFilter: React.FC<SidebarFilterProps> = ({
             marginBottom: "8px",
             fontSize: "14px",
             cursor: "pointer",
+            color: "#1e293b",
           }}
         >
           <input
@@ -101,6 +106,7 @@ export const SidebarFilter: React.FC<SidebarFilterProps> = ({
             marginBottom: "8px",
             fontSize: "14px",
             cursor: "pointer",
+            color: "#1e293b",
           }}
         >
           <input
@@ -196,6 +202,7 @@ export const SidebarFilter: React.FC<SidebarFilterProps> = ({
                   padding: "6px 8px",
                   borderRadius: "4px",
                   background: isSelected ? "#eff6ff" : "transparent",
+                  color: "#1e293b",
                   cursor: "pointer",
                 }}
               >
@@ -232,7 +239,7 @@ export const SidebarFilter: React.FC<SidebarFilterProps> = ({
           style={{
             width: "100%",
             padding: "12px",
-            background: "#059669", // Emerald Green
+            background: "#059669",
             color: "#fff",
             border: "none",
             borderRadius: "6px",
