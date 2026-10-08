@@ -1,112 +1,76 @@
-import React from "react";
-import type { CatalogItem } from "../types";
+import React from 'react';
+import type { CatalogItem, ItemStatus } from '../types';
 
-interface Props {
+interface CatalogTableProps {
   items: CatalogItem[];
-  selectedIds: string[];
-  onToggleSelect: (id: string) => void;
-  onToggleSelectAll: () => void;
+  selectedIds?: string[];
+  onToggleSelect?: (id: string) => void;
+  onToggleSelectAll?: () => void;
 }
 
-export const CatalogTable: React.FC<Props> = ({
+export const CatalogTable: React.FC<CatalogTableProps> = ({
   items,
-  selectedIds,
-  onToggleSelect,
-  onToggleSelectAll,
+  selectedIds = [],
+  onToggleSelect = () => {},
+  onToggleSelectAll = () => {},
 }) => {
-  const allSelected = items.length > 0 && selectedIds.length === items.length;
+  const allSelected = items.length > 0 && items.every((item) => selectedIds.includes(item.id));
+
+  const getStatusBadge = (status: ItemStatus) => {
+    switch (status) {
+      case 'completed':
+        return <span style={{ padding: '2px 8px', borderRadius: '4px', backgroundColor: '#065f46', color: '#34d399', fontSize: '11px' }}>Completed</span>;
+      case 'downloading':
+        return <span style={{ padding: '2px 8px', borderRadius: '4px', backgroundColor: '#1e40af', color: '#60a5fa', fontSize: '11px' }}>Downloading</span>;
+      case 'failed':
+        return <span style={{ padding: '2px 8px', borderRadius: '4px', backgroundColor: '#991b1b', color: '#f87171', fontSize: '11px' }}>Failed</span>;
+      case 'skipped':
+        return <span style={{ padding: '2px 8px', borderRadius: '4px', backgroundColor: '#92400e', color: '#fbbf24', fontSize: '11px' }}>Skipped</span>;
+      default:
+        return <span style={{ padding: '2px 8px', borderRadius: '4px', backgroundColor: '#334155', color: '#94a3b8', fontSize: '11px' }}>Pending</span>;
+    }
+  };
 
   return (
-    <div
-      style={{
-        flex: 1,
-        overflowY: "auto",
-        background: "#ffffff",
-        borderRadius: "8px",
-        border: "1px solid #e2e8f0",
-      }}
-    >
-      <table
-        style={{
-          width: "100%",
-          borderCollapse: "collapse",
-          textAlign: "left",
-          fontSize: "13px",
-        }}
-      >
+    <div style={{ overflowX: 'auto', width: '100%' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
         <thead>
-          <tr
-            style={{
-              background: "#f8fafc",
-              borderBottom: "1px solid #e2e8f0",
-              color: "#475569",
-            }}
-          >
-            <th style={{ padding: "12px", width: "40px" }}>
-              <input
-                type="checkbox"
-                checked={allSelected}
-                onChange={onToggleSelectAll}
-              />
+          <tr style={{ borderBottom: '1px solid #334155', color: '#94a3b8' }}>
+            <th style={{ padding: '12px 8px', width: '36px' }}>
+              <input type="checkbox" checked={allSelected} onChange={onToggleSelectAll} />
             </th>
-            <th style={{ padding: "12px" }}>Title</th>
-            <th style={{ padding: "12px" }}>Competency / Category</th>
-            <th style={{ padding: "12px" }}>Type</th>
-            <th style={{ padding: "12px" }}>Available Formats</th>
-            <th style={{ padding: "12px" }}>Status</th>
+            <th style={{ padding: '12px 8px' }}>Title</th>
+            <th style={{ padding: '12px 8px' }}>Competency / Category</th>
+            <th style={{ padding: '12px 8px' }}>Type</th>
+            <th style={{ padding: '12px 8px' }}>Status</th>
           </tr>
         </thead>
         <tbody>
-          {items.map((item) => {
-            const isSelected = selectedIds.includes(item.id);
-            return (
-              <tr
-                key={item.id}
-                style={{
-                  borderBottom: "1px solid #f1f5f9",
-                  background: isSelected ? "#f8fafc" : "transparent",
-                }}
-              >
-                <td style={{ padding: "12px" }}>
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => onToggleSelect(item.id)}
-                  />
-                </td>
-                <td style={{ padding: "12px", fontWeight: 500 }}>
-                  {item.title}
-                </td>
-                <td style={{ padding: "12px", color: "#475569" }}>
-                  {item.competency}
-                </td>
-                <td style={{ padding: "12px" }}>
-                  <span
-                    style={{
-                      fontSize: "11px",
-                      padding: "2px 8px",
-                      borderRadius: "4px",
-                      background:
-                        item.contentType === "webinar" ? "#fef3c7" : "#e0e7ff",
-                      color:
-                        item.contentType === "webinar" ? "#92400e" : "#3730a3",
-                    }}
-                  >
-                    {item.contentType === "webinar" ? "Webinar" : "Summary"}
-                  </span>
-                </td>
-                <td style={{ padding: "12px" }}>
-                  <span style={{ marginRight: "6px" }}>
-                    {item.pdfUrl ? "📄 PDF" : ""}
-                  </span>
-                  <span>{item.mp3Url ? "🎧 MP3" : ""}</span>
-                </td>
-                <td style={{ padding: "12px" }}>
-                  <StatusBadge status={item.status} />
-                </td>
-              </tr>
-            );
-          })}
+          {items.length === 0 ? (
+            <tr>
+              <td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
+                No catalog items found. Click "Scan Page / Fetch Summaries" to begin.
+              </td>
+            </tr>
+          ) : (
+            items.map((item) => {
+              const displayCategory = item.categories?.length ? item.categories.join(', ') : item.competency || 'General';
+              const displayType = item.type || item.contentType || 'summary';
+              const isSelected = selectedIds.includes(item.id);
+
+              return (
+                <tr key={item.id} style={{ borderBottom: '1px solid #1e293b', backgroundColor: isSelected ? '#1e293b' : 'transparent' }}>
+                  <td style={{ padding: '10px 8px' }}>
+                    <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(item.id)} />
+                  </td>
+                  <td style={{ padding: '10px 8px', fontWeight: 500, color: '#f8fafc' }}>{item.title}</td>
+                  <td style={{ padding: '10px 8px', color: '#cbd5e1' }}>{displayCategory}</td>
+                  <td style={{ padding: '10px 8px', color: '#94a3b8', textTransform: 'uppercase', fontSize: '11px' }}>{displayType}</td>
+                  <td style={{ padding: '10px 8px' }}>{getStatusBadge(item.status)}</td>
+                </tr>
+              );
+            })
+          )}
         </tbody>
       </table>
     </div>

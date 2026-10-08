@@ -1,37 +1,31 @@
 import React from "react";
 import type { DownloadFilter } from "../types";
 
-interface Props {
-  competencies: { name: string; count: number }[];
+interface CompetencyItem {
+  name: string;
+  count: number;
+}
+
+interface SidebarFilterProps {
   filter: DownloadFilter;
   setFilter: React.Dispatch<React.SetStateAction<DownloadFilter>>;
+  competencies?: CompetencyItem[]; 
+  categoryCounts?: Record<string, number>;
+  onStartScrape: () => void;
   onStartBatch: () => void;
   onStopBatch: () => void;
-  onStartScrape: () => void;
   isRunning: boolean;
 }
 
-export const SidebarFilter: React.FC<Props> = ({
-  competencies,
+export const SidebarFilter: React.FC<SidebarFilterProps> = ({
   filter,
   setFilter,
+  competencies = [],
+  onStartScrape,
   onStartBatch,
   onStopBatch,
-  onStartScrape,
   isRunning,
 }) => {
-  const toggleCompetency = (compName: string) => {
-    setFilter((prev) => {
-      const exists = prev.selectedCompetencies.includes(compName);
-      return {
-        ...prev,
-        selectedCompetencies: exists
-          ? prev.selectedCompetencies.filter((c) => c !== compName)
-          : [...prev.selectedCompetencies, compName],
-      };
-    });
-  };
-
   const selectAllCompetencies = () => {
     setFilter((prev) => ({
       ...prev,
@@ -41,6 +35,19 @@ export const SidebarFilter: React.FC<Props> = ({
 
   const clearCompetencies = () => {
     setFilter((prev) => ({ ...prev, selectedCompetencies: [] }));
+  };
+
+  const toggleCompetency = (name: string) => {
+    setFilter((prev) => {
+      const current = prev.selectedCompetencies || [];
+      const exists = current.includes(name);
+      return {
+        ...prev,
+        selectedCompetencies: exists
+          ? current.filter((c) => c !== name)
+          : [...current, name],
+      };
+    });
   };
 
   return (
@@ -176,7 +183,8 @@ export const SidebarFilter: React.FC<Props> = ({
 
         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
           {competencies.map((comp) => {
-            const isSelected = filter.selectedCompetencies.includes(comp.name);
+            const selectedList = filter.selectedCompetencies || [];
+            const isSelected = selectedList.includes(comp.name);
             return (
               <label
                 key={comp.name}

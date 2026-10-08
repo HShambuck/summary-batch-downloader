@@ -1,42 +1,55 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import type { CatalogIndex, CatalogItem, DownloadFilter } from '../types';
+import type { CatalogIndex, DownloadFilter, StorageState } from '../types';
 import { SidebarFilter } from './SidebarFilter';
+import { CatalogTable } from './CatalogTable';
 
 export const Dashboard: React.FC = () => {
   const [catalogIndex, setCatalogIndex] = useState<CatalogIndex>({});
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [filter, setFilter] = useState<DownloadFilter>({
     includePdf: true,
     includeMp3: true,
     skipDownloaded: false,
     selectedCategories: [],
+    selectedCompetencies: [],
     searchQuery: '',
   });
 
   const catalogList = useMemo(() => Object.values(catalogIndex), [catalogIndex]);
 
-  // Compute unique categories and counts for the sidebarFilter
   const categoryCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    catalogList.forEach((item) => {
-      const tags = item.categories.length > 0 ? item.categories : ['Uncategorized'];
-      tags.forEach((tag) => {
-        counts[tag] = (counts[tag] || 0) + 1;
-      });
+  const counts: Record<string, number> = {};
+  catalogList.forEach((item) => {
+    const tags = item.categories && item.categories.length > 0 ? item.categories : ['General'];
+    tags.forEach((tag) => {
+      counts[tag] = (counts[tag] || 0) + 1;
     });
-    return counts;
-  }, [catalogList]);
+  });
+  return counts;
+}, [catalogList]);
 
-  // Reactive storage update
+  const competenciesList = useMemo(() => {
+  return Object.entries(categoryCounts).map(([name, count]) => ({
+    name,
+    count,
+  }));
+}, [categoryCounts]);
+
   useEffect(() => {
-    chrome.storage.local.get(['catalogIndex', 'isRunning'], (data) => {
-      if (data.catalogIndex) setCatalogIndex(data.catalogIndex as CatalogIndex);
-      if (data.isRunning !== undefined) setIsRunning(data.isRunning);
+    chrome.storage.local.get(['catalogIndex', 'isRunning'], (data: StorageState) => {
+      if (data.catalogIndex) setCatalogIndex(data.catalogIndex);
+      if (typeof data.isRunning === 'boolean') {
+        setIsRunning(data.isRunning);
+      }
     });
 
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }) => {
       if (changes.catalogIndex?.newValue) {
         setCatalogIndex(changes.catalogIndex.newValue as CatalogIndex);
+      }
+      if (changes.isRunning?.newValue !== undefined) {
+        setIsRunning(Boolean(changes.isRunning.newValue));
       }
     };
 
@@ -62,7 +75,6 @@ export const Dashboard: React.FC = () => {
     });
   };
 
-  // Filter items for table display
   const filteredCatalog = useMemo(() => {
     return catalogList.filter((item) => {
       const matchesPdf = filter.includePdf && item.fileType === 'pdf';
@@ -71,10 +83,14 @@ export const Dashboard: React.FC = () => {
 
       if (filter.skipDownloaded && item.status === 'completed') return false;
 
-      if (filter.selectedCategories.length > 0) {
-        const itemTags = item.categories.length > 0 ? item.categories : ['Uncategorized'];
-        const hasMatchingCategory = filter.selectedCategories.some((cat) => itemTags.includes(cat));
-        if (!hasMatchingCategory) return false;
+      const activeCategories = (filter.selectedCategories && filter.selectedCategories.length > 0)
+        ? filter.selectedCategories 
+        : (filter.selectedCompetencies || []);
+
+      if (activeCategories.length > 0) {
+        const itemTags = item.categories && item.categories.length > 0 ? item.categories : ['General'];
+        const hasMatch = activeCategories.some((cat) => itemTags.includes(cat));
+        if (!hasMatch) return false;
       }
 
       if (filter.searchQuery.trim() !== '') {
@@ -89,23 +105,46 @@ export const Dashboard: React.FC = () => {
     });
   }, [catalogList, filter]);
 
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAll = () => {
+    const allFilteredIds = filteredCatalog.map((item) => item.id);
+    const areAllSelected = allFilteredIds.every((id) => selectedIds.includes(id));
+
+    if (areAllSelected) {
+      setSelectedIds((prev) => prev.filter((id) => !allFilteredIds.includes(id)));
+    } else {
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...allFilteredIds])));
+    }
+  };
+
   return (
-    <div className="flex h-screen bg-slate-900 text-slate-100">
+    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#0f172a', color: '#f8fafc' }}>
       <SidebarFilter
         filter={filter}
         setFilter={setFilter}
         categoryCounts={categoryCounts}
+        competencies={competenciesList}
         onStartScrape={handleStartScrape}
         onStartBatch={() => setIsRunning(true)}
         onStopBatch={() => setIsRunning(false)}
         isRunning={isRunning}
       />
-      <main className="flex-1 p-6 overflow-auto">
-        <h1 className="text-2xl font-bold mb-2">Catalog Dashboard</h1>
-        <p className="text-sm text-slate-400 mb-4">
-          Total Indexed: {catalogList.length} | Displayed: {filteredCatalog.length}
+      <main style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
+        <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px' }}>Catalog Dashboard</h1>
+        <p style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '16px' }}>
+          Total Items: {catalogList.length} | Displayed: {filteredCatalog.length} | Selected: {selectedIds.length}
         </p>
-        {/* Render filteredCatalog table rows */}
+        <CatalogTable
+          items={filteredCatalog}
+          selectedIds={selectedIds}
+          onToggleSelect={handleToggleSelect}
+          onToggleSelectAll={handleToggleSelectAll}
+        />
       </main>
     </div>
   );

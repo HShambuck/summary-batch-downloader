@@ -1,5 +1,5 @@
 export type FileType = 'pdf' | 'mp3';
-export type ItemStatus = 'pending' | 'downloading' | 'completed' | 'failed';
+export type ItemStatus = 'pending' | 'downloading' | 'completed' | 'failed' | 'skipped';
 
 export interface LogEntry {
   id: string;
@@ -14,12 +14,15 @@ export interface CatalogItem {
   title: string;
   authorOrSpeaker: string;
   type: 'summary' | 'webinar';
+  contentType?: 'summary' | 'webinar'; // Legacy compatibility for CatalogTable
   categories: string[];
+  competency?: string; // Legacy getter compatibility for single-competency displays
   downloadUrl: string;
   pdfUrl?: string;
   mp3Url?: string;
   fileType: FileType;
   status: ItemStatus;
+  filename?: string;
 }
 
 export type CatalogIndex = Record<string, CatalogItem>;
@@ -28,7 +31,8 @@ export interface DownloadFilter {
   includePdf: boolean;
   includeMp3: boolean;
   skipDownloaded: boolean;
-  selectedCompetencies: string[]; // <--- Matching SidebarFilter usage
+  selectedCategories: string[]; // Standardized category array
+  selectedCompetencies?: string[]; // Backwards-compatible alias
   searchQuery: string;
 }
 
