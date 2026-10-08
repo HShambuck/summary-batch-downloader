@@ -20,7 +20,10 @@ export const Dashboard: React.FC = () => {
     searchQuery: '',
   });
 
-  const catalogList = useMemo(() => Object.values(catalogIndex), [catalogIndex]);
+  const catalogList = useMemo(
+    () => Object.values(catalogIndex).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [catalogIndex]
+  );
 
   // Competencies with counts, largest first
   const competenciesList = useMemo(() => {
@@ -68,7 +71,13 @@ export const Dashboard: React.FC = () => {
       setNotice(null);
       const targetTabId = tabs[0]?.id;
       if (targetTabId) {
-        chrome.tabs.sendMessage(targetTabId, { type: 'START_SCRAPE' });
+        chrome.tabs.sendMessage(targetTabId, { type: 'START_SCRAPE' }, (res) => {
+          if (chrome.runtime.lastError) {
+            setNotice('Could not reach the page. Refresh the summary.com tab and scan again.');
+          } else if (res && res.count === 0) {
+            setNotice('Scan finished but found 0 items. Make sure summaries are visible on the page.');
+          }
+        });
       }
     });
   };

@@ -24,6 +24,7 @@ export interface CatalogItem {
   status: ItemStatus;
   filename?: string;
   error?: string;
+  order?: number;
 }
 
 // Export DownloadItem as an alias for CatalogItem to fix the missing type error
