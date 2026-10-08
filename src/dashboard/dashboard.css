@@ -32,31 +32,22 @@
 .sv-app *::before,
 .sv-app *::after { box-sizing: border-box; }
 .sv-app button { font: inherit; color: inherit; }
-.sv-app .sv-btn {
-  color: #fff;
-  font-weight: 600;
-}
-.sv-app .sv-console-head {
-  /* keep the existing properties, and change/add: */
-  color: #fff;
-  font-weight: 600;
-}
 .sv-app :focus-visible { outline: 2px solid var(--sv-accent); outline-offset: 2px; }
 .sv-app input[type="checkbox"] { accent-color: var(--sv-accent); width: 15px; height: 15px; margin: 0; cursor: pointer; }
 
 /* ───────── Buttons ───────── */
 .sv-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  width: 100%; padding: 12px; border-radius: 6px; border: none;
-  font-weight: 600; cursor: pointer; color: #fff;
-  transition: background-color .15s;
+  width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid transparent;
+  font-weight: 600; font-size: 13.5px; cursor: pointer;
+  transition: background-color .15s, border-color .15s, color .15s;
 }
-.sv-btn-scan { background: #059669; }
-.sv-btn-scan:hover { background: #047857; }
-.sv-btn-primary { background: #2563eb; }
-.sv-btn-primary:hover { background: #1d4ed8; }
-.sv-btn-danger { background: #ef4444; }
-.sv-btn-danger:hover { background: #dc2626; }
+.sv-btn-primary { background: var(--sv-accent); color: #fff; }
+.sv-btn-primary:hover { background: var(--sv-accent-hover); }
+.sv-btn-secondary { background: var(--sv-surface); border-color: var(--sv-line-strong); color: var(--sv-ink); }
+.sv-btn-secondary:hover { background: var(--sv-subtle); border-color: var(--sv-faint); }
+.sv-btn-danger { background: var(--sv-err); color: #fff; }
+.sv-btn-danger:hover { background: #962222; }
 .sv-link-btn {
   background: none; border: 0; padding: 2px 4px; border-radius: 4px;
   color: var(--sv-accent); font-size: 12.5px; font-weight: 600; cursor: pointer;
@@ -72,7 +63,7 @@
 }
 .sv-brand { display: flex; align-items: center; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--sv-line); }
 .sv-brand-mark {
-  width: 34px; height: 34px; border-radius: 9px; background: #2563eb; color: #fff;
+  width: 34px; height: 34px; border-radius: 9px; background: var(--sv-ink); color: #fff;
   display: grid; place-items: center; flex: none;
 }
 .sv-brand-name { font-weight: 650; font-size: 14.5px; line-height: 1.2; }
@@ -210,32 +201,53 @@
 
 /* ───────── Console dock ───────── */
 .sv-console {
-  position: fixed; bottom: 0; right: 24px; left: auto;
-  width: calc(100% - 310px); z-index: 1000;
+  position: fixed; bottom: 0; left: calc(var(--sv-sidebar-w) + 32px); right: 32px; z-index: 50;
   display: flex; flex-direction: column; overflow: hidden;
-  background: #0f172a; border-radius: 8px 8px 0 0;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
-  height: 36px; transition: height .3s ease-in-out;
+  background: #0f1724; border-radius: 10px 10px 0 0; box-shadow: 0 -6px 20px rgba(15, 23, 36, .18);
+  height: 38px; transition: height .25s ease;
 }
-.sv-console.is-open { height: 240px; }
+.sv-console.is-open { height: 264px; }
 .sv-console-head {
-  height: 36px; padding: 0 16px; background: #1e293b; color: #f8fafc;
-  font-size: 12px; font-weight: 600; border-radius: 8px 8px 0 0;
-  display: flex; align-items: center; justify-content: space-between;
-  width: 100%; border: 0; cursor: pointer; user-select: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: none; height: 38px;
+  padding: 0 14px; background: #1a2436; border: 0; width: 100%; cursor: pointer; color: #e8edf5; text-align: left;
 }
-.sv-console-left { display: flex; align-items: center; gap: 8px; }
-.sv-console-badge { background: #334155; padding: 2px 8px; border-radius: 12px; font-size: 11px; }
-.sv-console-body { flex: 1; padding: 12px 16px; overflow-y: auto; font-family: monospace; font-size: 12px; color: #e2e8f0; }
-.sv-log-time { color: #64748b; }
-.sv-log-error .sv-log-msg { color: #f87171; }
-.sv-log-success .sv-log-msg { color: #4ade80; }
-.sv-log-info .sv-log-msg { color: #94a3b8; }
-.sv-console-empty { color: #64748b; }
+.sv-console-head:focus-visible { outline-offset: -2px; outline-color: #8fa8ff; }
+.sv-console-left { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 12.5px; font-weight: 600; }
+.sv-console-badge { background: #2c3a52; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.sv-console-badge.is-err { background: #5b2323; color: #ffb4b4; }
+.sv-console-last { color: #8b9ab1; font-weight: 400; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sv-console-chevron { color: #8b9ab1; transition: transform .2s; flex: none; }
+.sv-console.is-open .sv-console-chevron { transform: rotate(180deg); }
+.sv-console-body {
+  flex: 1; overflow-y: auto; padding: 10px 14px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.6; color: #cfd8e6;
+}
+.sv-log { display: flex; gap: 10px; }
+.sv-log-time { color: #5f7089; flex: none; }
+.sv-log-msg { word-break: break-word; }
+.sv-log-error .sv-log-msg { color: #ff9b9b; }
+.sv-log-success .sv-log-msg { color: #7ee2a8; }
+.sv-log-info .sv-log-msg { color: #a9b6c9; }
+.sv-console-empty { color: #5f7089; }
 
 @media (max-width: 900px) {
   .sv-main { padding: 20px 16px 76px; }
+  .sv-console { left: calc(var(--sv-sidebar-w) + 16px); right: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .sv-app * { transition: none !important; animation: none !important; }
 }
+
+/* ───────── Pager ───────── */
+.sv-pager {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 16px; border-top: 1px solid var(--sv-line); background: var(--sv-subtle);
+  font-size: 13px; color: var(--sv-muted); font-variant-numeric: tabular-nums;
+}
+.sv-pager-btns { display: flex; align-items: center; gap: 12px; }
+.sv-pager button {
+  padding: 6px 12px; border-radius: 6px; border: 1px solid var(--sv-line-strong);
+  background: var(--sv-surface); font-weight: 600; font-size: 12.5px; cursor: pointer;
+}
+.sv-pager button:hover:not(:disabled) { background: var(--sv-bg); }
+.sv-pager button:disabled { opacity: .45; cursor: default; }

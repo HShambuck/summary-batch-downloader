@@ -5,7 +5,10 @@ import { CatalogTable } from './CatalogTable';
 import { ConsoleLog } from './ConsoleLog';
 import './dashboard.css';
 
+const PAGE_SIZE = 50;
+
 export const Dashboard: React.FC = () => {
+  const [page, setPage] = useState(1);
   const [catalogIndex, setCatalogIndex] = useState<CatalogIndex>({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState<boolean>(false);
@@ -69,13 +72,22 @@ export const Dashboard: React.FC = () => {
         return;
       }
       setNotice(null);
-      const targetTabId = tabs[0]?.id;
+      // Prefer a tab that is showing a library page, then the active tab
+      const target =
+        tabs.find((t) => /\/(book-summar|webinar)/.test(t.url || '')) ||
+        tabs.find((t) => t.active) ||
+        tabs[0];
+      const targetTabId = target?.id;
       if (targetTabId) {
         chrome.tabs.sendMessage(targetTabId, { type: 'START_SCRAPE' }, (res) => {
           if (chrome.runtime.lastError) {
             setNotice('Could not reach the page. Refresh the summary.com tab and scan again.');
-          } else if (res && res.count === 0) {
-            setNotice('Scan finished but found 0 items. Make sure summaries are visible on the page.');
+          } else if (res && res.success === false) {
+            setNotice(`Scan failed: ${res.error || 'unknown error'}`);
+          } else if (res && res.scraped === 0) {
+            setNotice(
+              `Found 0 items on ${target?.url || 'that tab'}. Open a page that lists summaries and scan again.`
+            );
           }
         });
       }
@@ -110,12 +122,22 @@ export const Dashboard: React.FC = () => {
     });
   }, [catalogList, filter]);
 
+  // Back to the first page whenever filters or search change
+  useEffect(() => {
+    setPage(1);
+  }, [filter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredCatalog.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageStart = (safePage - 1) * PAGE_SIZE;
+  const pageItems = filteredCatalog.slice(pageStart, pageStart + PAGE_SIZE);
+
   const handleToggleSelect = (id: string) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
   };
 
   const handleToggleSelectAll = () => {
-    const allFilteredIds = filteredCatalog.map((item) => item.id);
+    const allFilteredIds = pageItems.map((item) => item.id);
     const areAllSelected = allFilteredIds.every((id) => selectedIds.includes(id));
     if (areAllSelected) {
       setSelectedIds((prev) => prev.filter((id) => !allFilteredIds.includes(id)));
@@ -208,12 +230,29 @@ export const Dashboard: React.FC = () => {
 
         <div className="sv-panel sv-table-card">
           <CatalogTable
-            items={filteredCatalog}
+            items={pageItems}
             selectedIds={selectedIds}
             onToggleSelect={handleToggleSelect}
             onToggleSelectAll={handleToggleSelectAll}
             hasCatalog={total > 0}
           />
+          {filteredCatalog.length > PAGE_SIZE && (
+            <div className="sv-pager">
+              <span>
+                {pageStart + 1}–{Math.min(pageStart + PAGE_SIZE, filteredCatalog.length)} of{' '}
+                {filteredCatalog.length}
+              </span>
+              <div className="sv-pager-btns">
+                <button type="button" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
+                  Previous
+                </button>
+                <span>Page {safePage} of {totalPages}</span>
+                <button type="button" disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <ConsoleLog logs={logs} />

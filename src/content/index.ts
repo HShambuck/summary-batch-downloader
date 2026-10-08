@@ -2,6 +2,11 @@ import type { CatalogIndex, CatalogItem, ExtensionMessage } from '../types';
 
 // Headings that are page chrome, not competency names
 const GENERIC_HEADING = /^(browse|summaries|book summaries|webinars?|load more|search|filters?)$/i;
+const MAX_PAGES = 30; // safety cap for background page fetching
+const MAX_LOAD_MORE = 40; // safety cap for "Load more" button clicks
+const SMALL_WORDS = new Set(['and', 'of', 'the', 'in', 'for', 'to', 'a', 'an', 'on']);
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '').trim();
@@ -16,21 +21,87 @@ function cleanTitle(rawTitle: string): string {
   return rawTitle.trim();
 }
 
-function extractActivePageCategory(): string | null {
-  const urlParams = new URLSearchParams(window.location.search);
-  const paramCompetency =
-    urlParams.get('competence') || urlParams.get('category') || urlParams.get('subject');
-  if (paramCompetency) {
-    return paramCompetency.charAt(0).toUpperCase() + paramCompetency.slice(1);
-  }
+/* ───────── Category normalization ───────── */
 
-  const activeTag = document
+// "adversity-stress-burnout" -> "Adversity Stress Burnout"
+function toTitleCase(slug: string): string {
+  return slug
+    .replace(/[-_+]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .split(' ')
+    .map((w, i) => (i > 0 && SMALL_WORDS.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ');
+}
+
+function normalizeCategory(raw: string): string {
+  const s = sanitizeFilename(raw).replace(/\s+/g, ' ');
+  if (!s) return '';
+  const alreadyReadable = (/\s/.test(s) && /[A-Z]/.test(s)) || /^[A-Z0-9]+$/.test(s);
+  return alreadyReadable ? s : toTitleCase(s);
+}
+
+// Cleans a list of categories: splits slug lists ("a-b,c-d"), title-cases,
+// dedupes case-insensitively, and drops the "General" placeholder if real ones exist.
+function normalizeCategories(list: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  list
+    .flatMap((c) => (/\s/.test(c) ? [c] : c.split(/[,;|]/)))
+    .forEach((part) => {
+      const name = normalizeCategory(part);
+      const key = name.toLowerCase();
+      if (name && !seen.has(key)) {
+        seen.add(key);
+        out.push(name);
+      }
+    });
+
+  return out.length > 1 ? out.filter((c) => c !== 'General') : out;
+}
+
+// ?competence=a-b,c-d  ->  ["A B", "C D"]
+function categoriesFromUrl(url: string): string[] {
+  let params: URLSearchParams;
+  try {
+    params = new URL(url, location.href).searchParams;
+  } catch {
+    return [];
+  }
+  for (const key of ['competence', 'category', 'subject']) {
+    const values = params.getAll(key);
+    if (values.length) return normalizeCategories(values.flatMap((v) => v.split(',')));
+  }
+  return [];
+}
+
+function h1Category(doc: Document): string[] {
+  const text = doc
     .querySelector('.active-filter, [class*="selected-tag"], .page-title, h1')
     ?.textContent?.trim();
-  if (activeTag && !GENERIC_HEADING.test(activeTag) && !activeTag.toLowerCase().includes('summaries')) {
-    return sanitizeFilename(activeTag);
+  if (!text || GENERIC_HEADING.test(text)) return [];
+  const lower = text.toLowerCase();
+  if (lower.includes('browse') || lower.includes('summaries')) return [];
+  return normalizeCategories([text]);
+}
+
+/* ───────── Scraping ───────── */
+
+// Finds item cards: .item first, otherwise derives cards from summary/webinar links
+function findCards(doc: Document): Set<HTMLElement> {
+  const cards = new Set<HTMLElement>(Array.from(doc.querySelectorAll<HTMLElement>('.item')));
+  if (cards.size === 0) {
+    doc
+      .querySelectorAll<HTMLAnchorElement>('a[href*="/book-summary/"], a[href*="/webinar"]')
+      .forEach((a) => {
+        const card =
+          a.closest<HTMLElement>('li, article, [class*="card"], [class*="item"]') || a.parentElement;
+        if (card) cards.add(card);
+      });
   }
-  return null;
+  return cards;
 }
 
 // Tries selectors in priority order (a comma selector would return document order,
@@ -52,22 +123,27 @@ function extractTitle(node: HTMLElement, anchor: HTMLAnchorElement): string {
   );
 }
 
-function scrapeVisibleCatalog(): CatalogItem[] {
-  const items: CatalogItem[] = [];
-  const seen = new Set<string>();
-  const pageCategory = extractActivePageCategory();
-  let currentHeading: string | null = null;
+// Scrapes one document (the live page or a fetched page) in on-page order.
+function scrapeDocument(doc: Document, pageUrl: string, seen: Set<string>, items: CatalogItem[]) {
+  const urlCategories = categoriesFromUrl(pageUrl); // explicit filter wins
+  const fallbackCategories = urlCategories.length ? [] : h1Category(doc);
+  let currentHeading = '';
 
-  // One pass in document order: headings set the current competency,
-  // each .item card inherits the nearest heading above it.
-  document.querySelectorAll<HTMLElement>('h1, h2, h3, h4, .item').forEach((node) => {
+  const cardSet = findCards(doc);
+  const nodes = [
+    ...Array.from(doc.querySelectorAll<HTMLElement>('h1, h2, h3, h4')),
+    ...Array.from(cardSet),
+  ].sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+
+  nodes.forEach((node) => {
+    const isCard = cardSet.has(node);
     // Card titles may be h2-h4; they must not be mistaken for section headings
-    if (!node.classList.contains('item') && node.closest('.item')) return;
+    if (!isCard && Array.from(cardSet).some((c) => c.contains(node))) return;
 
-    if (!node.classList.contains('item')) {
+    if (!isCard) {
       const text = node.textContent?.trim() || '';
       if (text && text.length < 60 && !GENERIC_HEADING.test(text)) {
-        currentHeading = sanitizeFilename(text);
+        currentHeading = normalizeCategory(text);
       }
       return;
     }
@@ -81,14 +157,18 @@ function scrapeVisibleCatalog(): CatalogItem[] {
 
     const href = anchor.href;
     const isWebinar = href.includes('/webinar');
-    const category = currentHeading || pageCategory;
+    const categories = urlCategories.length
+      ? urlCategories
+      : currentHeading
+      ? [currentHeading]
+      : fallbackCategories;
 
     items.push({
       id: href,
       title: sanitizeFilename(cleanTitle(rawTitle)),
       authorOrSpeaker: node.querySelector('i')?.textContent?.trim() || 'Soundview Executive',
       type: isWebinar ? 'webinar' : 'summary',
-      categories: category ? [category] : [],
+      categories: [...categories],
       downloadUrl: href,
       pdfUrl: isWebinar ? undefined : href,
       mp3Url: isWebinar ? href : undefined,
@@ -97,41 +177,125 @@ function scrapeVisibleCatalog(): CatalogItem[] {
       order: items.length,
     });
   });
+}
+
+/* ───────── Crawling ───────── */
+
+// Clicks a JS-driven "Load more" button until the list stops growing.
+async function expandLoadMore(): Promise<void> {
+  for (let i = 0; i < MAX_LOAD_MORE; i++) {
+    const btn = Array.from(document.querySelectorAll<HTMLElement>('button, a')).find(
+      (el) => /^\s*load more\s*$/i.test(el.textContent || '') && el.offsetParent !== null
+    );
+    if (!btn) return;
+
+    // A real link is followed by fetchNextUrl-based crawling instead of a click
+    const href = btn.getAttribute('href');
+    if (href && href !== '#' && !href.startsWith('javascript:')) return;
+
+    const before = findCards(document).size;
+    btn.click();
+    let grew = false;
+    for (let t = 0; t < 25 && !grew; t++) {
+      await sleep(200);
+      grew = findCards(document).size > before;
+    }
+    if (!grew) return;
+  }
+}
+
+function findNextUrl(doc: Document, currentUrl: string): string | null {
+  let href = doc.querySelector('a[rel~="next"], link[rel~="next"]')?.getAttribute('href') || '';
+  if (!href) {
+    const link = Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]')).find((a) =>
+      /^\s*(next|next page|load more|more)\s*[›»>]?\s*$/i.test(a.textContent || '')
+    );
+    href = link?.getAttribute('href') || '';
+  }
+  if (!href || href === '#' || href.startsWith('javascript:')) return null;
+  try {
+    const url = new URL(href, currentUrl);
+    return url.origin === location.origin ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+async function crawlCatalog(): Promise<CatalogItem[]> {
+  const items: CatalogItem[] = [];
+  const seen = new Set<string>();
+  const visited = new Set<string>([location.href]);
+
+  await expandLoadMore();
+
+  let doc: Document = document;
+  let url = location.href;
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    scrapeDocument(doc, url, seen, items);
+
+    const next = findNextUrl(doc, url);
+    if (!next || visited.has(next)) break;
+    visited.add(next);
+
+    try {
+      const res = await fetch(next, { credentials: 'include' });
+      if (!res.ok) break;
+      doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+      url = next;
+    } catch {
+      break;
+    }
+  }
 
   return items;
 }
 
+/* ───────── Message handling ───────── */
+
 chrome.runtime.onMessage.addListener(
   (message: ExtensionMessage, _sender, sendResponse) => {
     if (message.type === 'START_SCRAPE') {
-      const scrapedItems = scrapeVisibleCatalog();
+      crawlCatalog()
+        .then((scrapedItems) => {
+          chrome.storage.local.get(['catalogIndex'], (result) => {
+            const existingIndex: CatalogIndex = (result.catalogIndex || {}) as CatalogIndex;
 
-      chrome.storage.local.get(['catalogIndex'], (result) => {
-        const existingIndex: CatalogIndex = (result.catalogIndex || {}) as CatalogIndex;
+            scrapedItems.forEach((newItem) => {
+              const existingItem = existingIndex[newItem.id];
 
-        scrapedItems.forEach((newItem) => {
-          const existingItem = existingIndex[newItem.id];
+              if (existingItem) {
+                existingIndex[newItem.id] = {
+                  ...existingItem, // keeps status, filename, etc.
+                  categories: normalizeCategories([
+                    ...existingItem.categories,
+                    ...newItem.categories,
+                  ]),
+                  order: newItem.order,
+                };
+              } else {
+                existingIndex[newItem.id] = {
+                  ...newItem,
+                  categories: normalizeCategories(newItem.categories),
+                };
+              }
+            });
 
-          if (existingItem) {
-            // Union categories, but drop the "General" placeholder once a real one exists
-            const merged = Array.from(new Set([...existingItem.categories, ...newItem.categories]));
-            const categories = merged.length > 1 ? merged.filter((c) => c !== 'General') : merged;
-
-            existingIndex[newItem.id] = {
-              ...existingItem, // keeps status, filename, etc.
-              categories,
-              order: newItem.order,
-            };
-          } else {
-            existingIndex[newItem.id] = newItem;
-          }
-        });
-
-        chrome.storage.local.set({ catalogIndex: existingIndex }, () => {
-          const itemsList = Object.values(existingIndex);
-          sendResponse({ success: true, count: itemsList.length, items: itemsList });
-        });
-      });
+            chrome.storage.local.set({ catalogIndex: existingIndex }, () => {
+              const itemsList = Object.values(existingIndex);
+              console.log(
+                `[Summary Downloader] Scan found ${scrapedItems.length} items (${itemsList.length} stored)`
+              );
+              sendResponse({
+                success: true,
+                scraped: scrapedItems.length,
+                count: itemsList.length,
+                items: itemsList,
+              });
+            });
+          });
+        })
+        .catch((err) => sendResponse({ success: false, scraped: 0, error: String(err) }));
 
       return true;
     }
