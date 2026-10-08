@@ -46,6 +46,8 @@ export interface StorageState {
   isRunning?: boolean;
   completedCount?: number;
   totalCount?: number;
+  isScanning?: boolean;   // add
+  pageSize?: number;      // add
   logs?: LogEntry[];
 }
 

@@ -1,14 +1,14 @@
-import React, { useEffect, useRef, useState } from "react";
-import type { LogEntry } from "../types";
+import React, { useEffect, useRef, useState } from 'react';
+import type { LogEntry } from '../types';
 
 interface ConsoleLogProps {
   logs: LogEntry[];
 }
 
-const levelOf = (log: LogEntry): "error" | "success" | "info" => {
-  if (log.level === "error" || log.type === "error") return "error";
-  if (log.level === "success" || log.type === "success") return "success";
-  return "info";
+const levelOf = (log: LogEntry): 'error' | 'success' | 'info' => {
+  if (log.level === 'error' || log.type === 'error') return 'error';
+  if (log.level === 'success' || log.type === 'success') return 'success';
+  return 'info';
 };
 
 export const ConsoleLog: React.FC<ConsoleLogProps> = ({ logs }) => {
@@ -23,7 +23,7 @@ export const ConsoleLog: React.FC<ConsoleLogProps> = ({ logs }) => {
   }, [logs.length, isOpen]);
 
   return (
-    <div className={`sv-console ${isOpen ? "is-open" : ""}`}>
+    <div className={`sv-console ${isOpen ? 'is-open' : ''}`}>
       <button
         type="button"
         className="sv-console-head"
@@ -35,41 +35,17 @@ export const ConsoleLog: React.FC<ConsoleLogProps> = ({ logs }) => {
           <span>ACTIVITY CONSOLE LOG</span>
           <span className="sv-console-badge">{logs.length}</span>
         </span>
-        <span>{isOpen ? "▼ Collapse" : "▲ Expand Console"}</span>
-        <svg
-          className="sv-console-chevron"
-          width="14"
-          height="14"
-          viewBox="0 0 14 14"
-          fill="none"
-          aria-hidden="true"
-        >
-          <path
-            d="M3 9l4-4 4 4"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        <span>{isOpen ? '▼ Collapse' : '▲ Expand Console'}</span>
       </button>
 
       {isOpen && (
-        <div
-          id="sv-console-body"
-          ref={bodyRef}
-          className="sv-console-body"
-          role="log"
-          aria-live="polite"
-        >
+        <div id="sv-console-body" ref={bodyRef} className="sv-console-body" role="log" aria-live="polite">
           {logs.length === 0 ? (
-            <div className="sv-console-empty">
-              Nothing logged yet. Scans and downloads will show up here.
-            </div>
+            <div className="sv-console-empty">No activity logged yet...</div>
           ) : (
             logs.map((log) => (
               <div key={log.id} className={`sv-log sv-log-${levelOf(log)}`}>
-                <span className="sv-log-time">{log.timestamp}</span>
+                <span className="sv-log-time">[{log.timestamp}]&nbsp;</span>
                 <span className="sv-log-msg">{log.message}</span>
               </div>
             ))
