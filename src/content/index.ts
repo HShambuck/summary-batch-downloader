@@ -2,10 +2,21 @@ import type { CatalogIndex, CatalogItem, ExtensionMessage, LogEntry } from '../t
 
 const LIBRARY_PATH = '/book-summaries/';
 const MAX_PAGES = 80; // per listing
-const MAX_REQUESTS = 900; // per scan
+const MAX_REQUESTS = 1200; // per scan
 const MAX_LOAD_MORE = 60;
 const FETCH_DELAY_MS = 120;
 const SMALL_WORDS = new Set(['and', 'of', 'the', 'in', 'for', 'to', 'a', 'an', 'on']);
+
+interface Competency {
+  slug: string;
+  name: string; // the site's own label, e.g. "Adversity, Stress & Burnout"
+  count: number; // the site's own book count
+}
+
+interface ScanProgress {
+  complete: boolean; // false while a scan is unfinished, so the next scan resumes it
+  done: Record<string, number>; // competency slug -> the site's book count when it was crawled
+}
 
 let isScanning = false;
 let requestCount = 0;
@@ -34,7 +45,7 @@ async function appendLog(message: string, level: LogEntry['level'] = 'info'): Pr
   await storageSet({ logs: logs.slice(-300) });
 }
 
-/* ───────── Text + category normalization ───────── */
+/* ───────── Text helpers ───────── */
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '').trim();
@@ -49,7 +60,19 @@ function cleanTitle(rawTitle: string): string {
   return rawTitle.trim();
 }
 
-// "adversity-stress-burnout" -> "Adversity Stress Burnout"
+// "The Power of Habit by Charles Duhigg" -> title + author.
+// Only splits when the part after the last " by " looks like a name (2+ words),
+// so titles such as "Led by Example" stay whole.
+function splitTitleAuthor(raw: string): { title: string; author: string } {
+  const idx = raw.lastIndexOf(' by ');
+  if (idx > 0) {
+    const author = raw.slice(idx + 4).trim();
+    if (author.split(/\s+/).length >= 2) return { title: raw.slice(0, idx).trim(), author };
+  }
+  return { title: raw.trim(), author: '' };
+}
+
+// "adversity-stress-burnout" -> "Adversity Stress Burnout" (only used when the site gives no label)
 function toTitleCase(slug: string): string {
   return slug
     .replace(/[-_+]+/g, ' ')
@@ -61,41 +84,47 @@ function toTitleCase(slug: string): string {
     .join(' ');
 }
 
-function normalizeCategory(raw: string): string {
-  const s = sanitizeFilename(raw).replace(/\s+/g, ' ');
-  if (!s) return '';
-  const alreadyReadable = (/\s/.test(s) && /[A-Z]/.test(s)) || /^[A-Z0-9]+$/.test(s);
-  return alreadyReadable ? s : toTitleCase(s);
-}
-
-// Splits slug lists, title-cases, dedupes (case-insensitive), drops "General" if real tags exist
-function normalizeCategories(list: string[]): string[] {
+// Site names are kept exactly as written; this only trims and removes duplicates
+function dedupeCategories(list: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  list
-    .flatMap((c) => (/\s/.test(c) ? [c] : c.split(/[,;|]/)))
-    .forEach((part) => {
-      const name = normalizeCategory(part);
-      const key = name.toLowerCase();
-      if (name && !seen.has(key)) {
-        seen.add(key);
-        out.push(name);
-      }
-    });
+  list.forEach((raw) => {
+    const name = raw.trim();
+    const key = name.toLowerCase();
+    if (name && !seen.has(key)) {
+      seen.add(key);
+      out.push(name);
+    }
+  });
   return out.length > 1 ? out.filter((c) => c !== 'General') : out;
 }
 
-function categoriesFromUrl(url: string): string[] {
+function slugsFromUrl(url: string): string[] {
   try {
-    const params = new URL(url, location.href).searchParams;
-    for (const key of ['competence', 'category', 'subject']) {
-      const values = params.getAll(key);
-      if (values.length) return normalizeCategories(values.flatMap((v) => v.split(',')));
-    }
+    return new URL(url, location.href).searchParams
+      .getAll('competence')
+      .flatMap((v) => v.split(','))
+      .map((s) => s.trim())
+      .filter(Boolean);
   } catch {
-    /* ignore */
+    return [];
   }
-  return [];
+}
+
+/* ───────── Competency list (from the site's dropdown) ───────── */
+
+function discoverCompetencies(doc: Document): Competency[] {
+  const out: Competency[] = [];
+  const seen = new Set<string>();
+  doc.querySelectorAll<HTMLAnchorElement>('#dropdown-competencies a[data-slug]').forEach((a) => {
+    const slug = (a.getAttribute('data-slug') || '').trim();
+    const name = a.querySelector('span')?.textContent?.trim() || '';
+    const count = parseInt(a.querySelector('i')?.textContent?.trim() || '', 10);
+    if (!slug || !name || seen.has(slug)) return;
+    seen.add(slug);
+    out.push({ slug, name, count: Number.isNaN(count) ? 0 : count });
+  });
+  return out;
 }
 
 /* ───────── Scraping one document ───────── */
@@ -110,18 +139,26 @@ function absoluteUrl(href: string | null, base: string): string {
   }
 }
 
-// .item cards first; otherwise derive cards from summary/webinar links
+// Real results live in ul.books-grid. The hidden quote block (.quotes-container)
+// also links to books on every page, so it must never be read.
 function findCards(doc: Document): HTMLElement[] {
-  const cards = new Set<HTMLElement>(Array.from(doc.querySelectorAll<HTMLElement>('.item')));
-  if (cards.size === 0) {
-    doc
-      .querySelectorAll<HTMLAnchorElement>('a[href*="/book-summary/"], a[href*="/webinar"]')
-      .forEach((a) => {
-        const card =
-          a.closest<HTMLElement>('li, article, [class*="card"], [class*="item"]') || a.parentElement;
-        if (card) cards.add(card);
-      });
-  }
+  const grid = Array.from(doc.querySelectorAll<HTMLElement>('ul.books-grid > li'));
+  if (grid.length > 0) return grid;
+
+  const items = Array.from(doc.querySelectorAll<HTMLElement>('.item')).filter(
+    (el) => !el.closest('.quotes-container')
+  );
+  if (items.length > 0) return items;
+
+  const cards = new Set<HTMLElement>();
+  doc
+    .querySelectorAll<HTMLAnchorElement>('a[href*="/book-summary/"], a[href*="/webinar"]')
+    .forEach((a) => {
+      if (a.closest('.quotes-container, .summary-quote-wrapper')) return;
+      const card =
+        a.closest<HTMLElement>('li, article, [class*="card"], [class*="item"]') || a.parentElement;
+      if (card) cards.add(card);
+    });
   return Array.from(cards);
 }
 
@@ -158,15 +195,21 @@ function scrapeDocument(
     );
     if (!anchor) return;
     const href = absoluteUrl(anchor.getAttribute('href'), pageUrl);
-    const rawTitle = extractTitle(node, anchor);
-    if (!href || rawTitle.length < 2 || seen.has(href)) return;
+    const raw = cleanTitle(extractTitle(node, anchor));
+    if (!href || raw.length < 2 || seen.has(href)) return;
     seen.add(href);
+
+    const authorEl = node.querySelector('a[href*="/author/"]')?.textContent?.trim() || '';
+    const split = splitTitleAuthor(raw);
+    const author = authorEl || split.author || 'Soundview Executive';
+    const title =
+      authorEl && raw.endsWith(` by ${authorEl}`) ? raw.slice(0, -(authorEl.length + 4)).trim() : split.title;
 
     const isWebinar = href.includes('/webinar');
     out.push({
       id: href,
-      title: sanitizeFilename(cleanTitle(rawTitle)),
-      authorOrSpeaker: node.querySelector('i')?.textContent?.trim() || 'Soundview Executive',
+      title: sanitizeFilename(title),
+      authorOrSpeaker: author,
       type: isWebinar ? 'webinar' : 'summary',
       categories: [...categories],
       downloadUrl: href,
@@ -185,7 +228,8 @@ function scrapeDocument(
 async function fetchDoc(url: string): Promise<Document | null> {
   if (requestCount >= MAX_REQUESTS) throw new Error('Request limit reached for one scan');
   requestCount++;
-  await sleep(FETCH_DELAY_MS);
+  // Timers in a background tab are throttled to ~1/min after 5 minutes, so skip the delay there
+  if (!document.hidden) await sleep(FETCH_DELAY_MS);
   try {
     const res = await fetch(url, { credentials: 'include' });
     if (!res.ok) return null;
@@ -274,33 +318,6 @@ async function crawlListing(
   return pages;
 }
 
-/* ───────── Competency discovery ───────── */
-
-function discoverCompetencySlugs(doc: Document, into: Set<string>) {
-  const add = (raw: string | null | undefined) =>
-    (raw || '')
-      .split(',')
-      .map((s) => s.trim().toLowerCase())
-      .filter((s) => /^[a-z0-9][a-z0-9_-]*$/.test(s))
-      .forEach((s) => into.add(s));
-
-  doc.querySelectorAll<HTMLAnchorElement>('a[href*="competence="]').forEach((a) => {
-    try {
-      new URL(a.getAttribute('href') || '', location.href).searchParams
-        .getAll('competence')
-        .forEach(add);
-    } catch {
-      /* ignore */
-    }
-  });
-  doc
-    .querySelectorAll<HTMLInputElement>('input[name^="competence"], select[name^="competence"] option')
-    .forEach((el) => add(el.value));
-  doc
-    .querySelectorAll<HTMLElement>('[data-competence], [data-competency]')
-    .forEach((el) => add(el.getAttribute('data-competence') || el.getAttribute('data-competency')));
-}
-
 /* ───────── "Load more" button fallback (live page only) ───────── */
 
 function findLoadMoreButton(): HTMLElement | null {
@@ -334,12 +351,12 @@ function addItems(byId: Map<string, CatalogItem>, batch: CatalogItem[]) {
   batch.forEach((item) => {
     const existing = byId.get(item.id);
     if (existing) {
-      existing.categories = normalizeCategories([...existing.categories, ...item.categories]);
+      existing.categories = dedupeCategories([...existing.categories, ...item.categories]);
     } else {
       byId.set(item.id, {
         ...item,
         order: byId.size,
-        categories: normalizeCategories(item.categories),
+        categories: dedupeCategories(item.categories),
       });
     }
   });
@@ -349,10 +366,19 @@ async function runFullScan(): Promise<void> {
   requestCount = 0;
   await appendLog('Scan started. Reading the full summary library…');
 
-  const existing: CatalogIndex =
-    (await storageGet<{ catalogIndex?: CatalogIndex }>(['catalogIndex'])).catalogIndex || {};
+  const saved = await storageGet<{ catalogIndex?: CatalogIndex; scanProgress?: ScanProgress }>([
+    'catalogIndex',
+    'scanProgress',
+  ]);
+  const existing: CatalogIndex = saved.catalogIndex || {};
+  const progress: ScanProgress = saved.scanProgress || { complete: false, done: {} };
+  // An interrupted scan is resumed from what was saved instead of restarted
+  const resuming =
+    !!saved.scanProgress && !saved.scanProgress.complete && Object.keys(existing).length > 0;
   const byId = new Map<string, CatalogItem>();
+  if (resuming) Object.values(existing).forEach((item) => byId.set(item.id, { ...item }));
   let pageSize = 0;
+  let competencies: Competency[] = [];
 
   const persist = async () => {
     const index: CatalogIndex = {};
@@ -362,18 +388,29 @@ async function runFullScan(): Promise<void> {
         ? { ...item, status: old.status, filename: old.filename, error: old.error }
         : item;
     });
-    await storageSet(pageSize > 0 ? { catalogIndex: index, pageSize } : { catalogIndex: index });
+    const data: Record<string, unknown> = {
+      catalogIndex: index,
+      competencies: competencies.map((c) => ({ name: c.name, count: c.count })),
+      scanProgress: progress,
+    };
+    if (pageSize > 0) data.pageSize = pageSize;
+    await storageSet(data);
   };
 
-  // 1. Whole library, in the site's own order (no tags yet)
+  // 1. The site's competency list (server-rendered in the Competencies dropdown)
   const libraryUrl = `${location.origin}${LIBRARY_PATH}`;
   const baseDoc = await fetchDoc(libraryUrl);
-  const slugs = new Set<string>();
-  discoverCompetencySlugs(document, slugs);
-  if (baseDoc) discoverCompetencySlugs(baseDoc, slugs);
-  categoriesFromUrl(location.href).forEach((c) => slugs.add(c.toLowerCase().replace(/\s+/g, '-')));
+  competencies = baseDoc ? discoverCompetencies(baseDoc) : [];
+  if (competencies.length === 0) competencies = discoverCompetencies(document);
+  await appendLog(
+    competencies.length
+      ? `Found ${competencies.length} competencies on the site.`
+      : 'Could not find the Competencies dropdown. Items will stay uncategorised.',
+    competencies.length ? 'info' : 'warn'
+  );
 
-  const basePages = baseDoc
+  // 2. Whole library, in the site's own order (no tags yet)
+  const basePages = baseDoc && !resuming
     ? await crawlListing(
         libraryUrl,
         [],
@@ -385,8 +422,8 @@ async function runFullScan(): Promise<void> {
       )
     : 0;
 
-  // 2. Fallback: read the live page (JS-rendered lists, or "Load more" buttons)
-  if (byId.size === 0 || (basePages <= 1 && findLoadMoreButton())) {
+  // Fallback: read the live page (JS-rendered lists, or "Load more" buttons)
+  if (!resuming && (byId.size === 0 || (basePages <= 1 && findLoadMoreButton()))) {
     await appendLog(
       byId.size === 0
         ? `Could not read ${libraryUrl} directly. Scanning this page instead.`
@@ -394,7 +431,9 @@ async function runFullScan(): Promise<void> {
       'warn'
     );
     await expandLoadMore();
-    addItems(byId, scrapeDocument(document, location.href, categoriesFromUrl(location.href), new Set()));
+    const nameBySlug = new Map(competencies.map((c) => [c.slug, c.name]));
+    const liveCategories = slugsFromUrl(location.href).map((s) => nameBySlug.get(s) || toTitleCase(s));
+    addItems(byId, scrapeDocument(document, location.href, liveCategories, new Set()));
   }
 
   if (byId.size === 0) {
@@ -402,41 +441,65 @@ async function runFullScan(): Promise<void> {
     return;
   }
 
+  if (!resuming) {
+    // Keep old tags only for competencies that won't be re-crawled (site count unchanged)
+    const keep = new Set(
+      competencies.filter((c) => progress.done[c.slug] === c.count).map((c) => c.name)
+    );
+    byId.forEach((item) => {
+      item.categories = (existing[item.id]?.categories || []).filter((c) => keep.has(c));
+    });
+  }
+  progress.complete = false;
   await persist();
-  await appendLog(`Library: ${byId.size} summaries (${basePages || 1} page(s)).`, 'success');
+  await appendLog(
+    resuming
+      ? `Resuming the previous scan: ${byId.size} summaries loaded, ` +
+          `${competencies.filter((c) => progress.done[c.slug] === c.count).length}/${competencies.length} competencies already done.`
+      : `Library: ${byId.size} summaries (${basePages || 1} page(s)).`,
+    'success'
+  );
 
   // 3. One filtered crawl per competency, so each item gets exact tags
-  const list = Array.from(slugs);
-  if (list.length === 0) {
-    await appendLog('No competency filters found on the page. Items stay uncategorised.', 'warn');
-  }
   const baseCount = byId.size;
-
-  for (let i = 0; i < list.length; i++) {
-    const slug = list[i];
-    const name = toTitleCase(slug);
+  let skipped = 0;
+  for (let i = 0; i < competencies.length; i++) {
+    const comp = competencies[i];
+    if (progress.done[comp.slug] === comp.count) {
+      skipped++; // already crawled and the site's count hasn't changed
+      continue;
+    }
     const filteredUrl = new URL(libraryUrl);
-    filteredUrl.searchParams.set('competence', slug);
+    filteredUrl.searchParams.set('competence', comp.slug);
 
     const found: CatalogItem[] = [];
-    await crawlListing(filteredUrl.href, [name], (batch) => found.push(...batch));
+    await crawlListing(filteredUrl.href, [comp.name], (batch) => found.push(...batch));
 
-    // If the filter returns the entire library, the site ignored it: don't tag everything
-    if (list.length > 1 && found.length >= baseCount * 0.98) {
-      await appendLog(`Competency "${name}" returned the whole library, so it was skipped.`, 'warn');
+    // If a filter returns the entire library, the site ignored it: don't tag everything
+    if (competencies.length > 1 && found.length >= baseCount * 0.98) {
+      await appendLog(`"${comp.name}" returned the whole library, so it was skipped.`, 'warn');
       continue;
     }
 
     addItems(byId, found);
-    await appendLog(`Competency ${i + 1}/${list.length}: ${name} (${found.length} items)`);
-    await persist();
+    progress.done[comp.slug] = comp.count;
+    const mismatch = comp.count > 0 && found.length !== comp.count;
+    await appendLog(
+      `Competency ${i + 1}/${competencies.length}: ${comp.name} (${found.length} items)` +
+        (mismatch ? `, site lists ${comp.count}` : ''),
+      mismatch ? 'warn' : 'info'
+    );
+    await persist(); // saved after every competency, so an interrupted scan can resume
   }
 
+  progress.complete = true;
   await persist();
-  const tags = new Set<string>();
-  byId.forEach((item) => item.categories.forEach((c) => tags.add(c)));
+  if (skipped > 0) {
+    await appendLog(`Skipped ${skipped} competencies that were unchanged since the last scan.`);
+  }
+  const tagged = Array.from(byId.values()).filter((item) => item.categories.length > 0).length;
   await appendLog(
-    `Scan complete: ${byId.size} summaries, ${tags.size} competencies.`,
+    `Scan complete: ${byId.size} summaries, ${tagged} tagged across ${competencies.length} competencies.`,
     'success'
   );
 }
