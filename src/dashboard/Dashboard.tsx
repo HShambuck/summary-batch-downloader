@@ -1,36 +1,66 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import type { CatalogIndex, DownloadFilter, StorageState, LogEntry } from '../types';
+import type {
+  CatalogIndex,
+  DownloadFilter,
+  DownloadJob,
+  FileType,
+  ItemDownloadState,
+  ItemStatus,
+  StorageState,
+  LogEntry,
+} from '../types';
 import { SidebarFilter } from './SidebarFilter';
 import { CatalogTable } from './CatalogTable';
 import { ConsoleLog } from './ConsoleLog';
 import './dashboard.css';
 
 const DEFAULT_PAGE_SIZE = 50;
+const CONFIRM_ABOVE = 100; // ask before downloading more than this many books with nothing selected
 
 export const Dashboard: React.FC = () => {
   const [catalogIndex, setCatalogIndex] = useState<CatalogIndex>({});
+  const [downloadState, setDownloadState] = useState<Record<string, ItemDownloadState>>({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
-  const [siteCompetencies, setSiteCompetencies] = useState<{ name: string; count: number }[]>([]);
   const [page, setPage] = useState(1);
+  const [siteCompetencies, setSiteCompetencies] = useState<{ name: string; count: number }[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [filter, setFilter] = useState<DownloadFilter>({
-    includePdf: true,
-    includeMp3: true,
-    skipDownloaded: false,
+    includePdf: true, // books by default
+    includeMp3: false,
+    skipDownloaded: true,
     selectedCategories: [],
     selectedCompetencies: [],
     searchQuery: '',
   });
 
-  // Site order (the scan stores each item's position)
-  const catalogList = useMemo(
-    () => Object.values(catalogIndex).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
-    [catalogIndex]
-  );
+  const { includePdf, includeMp3 } = filter;
+
+  // Site order, with each book's status worked out from the files chosen for download
+  const catalogList = useMemo(() => {
+    const kinds: FileType[] = [];
+    if (includePdf) kinds.push('pdf');
+    if (includeMp3) kinds.push('mp3');
+    if (kinds.length === 0) kinds.push('pdf', 'mp3');
+
+    const statusOf = (id: string): ItemStatus => {
+      const state = downloadState[id];
+      if (!state) return 'pending';
+      const states = kinds.map((k) => state[k]);
+      if (states.includes('downloading')) return 'downloading';
+      if (states.includes('failed')) return 'failed';
+      if (states.every((s) => s === 'unavailable')) return 'skipped';
+      if (states.every((s) => s === 'completed' || s === 'unavailable')) return 'completed';
+      return 'pending';
+    };
+
+    return Object.values(catalogIndex)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      .map((item) => ({ ...item, status: statusOf(item.id) }));
+  }, [catalogIndex, downloadState, includePdf, includeMp3]);
 
   // The site's competency list (in the site's order) with counts from the indexed items
   const competenciesList = useMemo(() => {
@@ -52,9 +82,10 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => {
     chrome.storage.local.get(
-      ['catalogIndex', 'isRunning', 'isScanning', 'pageSize', 'competencies', 'logs'],
+      ['catalogIndex', 'downloadState', 'isRunning', 'isScanning', 'pageSize', 'competencies', 'logs'],
       (data: StorageState) => {
         if (data.catalogIndex) setCatalogIndex(data.catalogIndex);
+        if (data.downloadState) setDownloadState(data.downloadState);
         if (typeof data.isRunning === 'boolean') setIsRunning(data.isRunning);
         if (typeof data.isScanning === 'boolean') setIsScanning(data.isScanning);
         if (typeof data.pageSize === 'number' && data.pageSize > 0) setPageSize(data.pageSize);
@@ -66,6 +97,9 @@ export const Dashboard: React.FC = () => {
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }) => {
       if (changes.catalogIndex?.newValue !== undefined) {
         setCatalogIndex((changes.catalogIndex.newValue as CatalogIndex) || {});
+      }
+      if (changes.downloadState?.newValue !== undefined) {
+        setDownloadState((changes.downloadState.newValue as Record<string, ItemDownloadState>) || {});
       }
       if (changes.isRunning?.newValue !== undefined) {
         setIsRunning(Boolean(changes.isRunning.newValue));
@@ -113,12 +147,6 @@ export const Dashboard: React.FC = () => {
 
   const filteredCatalog = useMemo(() => {
     return catalogList.filter((item) => {
-      const matchesPdf = filter.includePdf && item.fileType === 'pdf';
-      const matchesMp3 = filter.includeMp3 && item.fileType === 'mp3';
-      if (!matchesPdf && !matchesMp3) return false;
-
-      if (filter.skipDownloaded && item.status === 'completed') return false;
-
       const activeCategories =
         filter.selectedCompetencies?.length > 0 ? filter.selectedCompetencies : filter.selectedCategories;
 
@@ -163,6 +191,61 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  // Download the selected rows, or everything the filters show when nothing is selected
+  const handleStartBatch = () => {
+    const kinds: FileType[] = [];
+    if (filter.includePdf) kinds.push('pdf');
+    if (filter.includeMp3) kinds.push('mp3');
+    if (kinds.length === 0) {
+      setNotice('Choose at least one file type to download (PDF or MP3).');
+      return;
+    }
+
+    const source =
+      selectedIds.length > 0 ? catalogList.filter((i) => selectedIds.includes(i.id)) : filteredCatalog;
+
+    const jobs: DownloadJob[] = [];
+    source.forEach((item) => {
+      if (item.type === 'webinar') return; // webinars are handled separately
+      const wanted = kinds.filter(
+        (k) => !(filter.skipDownloaded && downloadState[item.id]?.[k] === 'completed')
+      );
+      if (wanted.length === 0) return;
+      jobs.push({
+        id: item.id,
+        title: item.title,
+        author: item.authorOrSpeaker,
+        category: item.categories[0] || 'Uncategorised',
+        kinds: wanted,
+      });
+    });
+
+    if (jobs.length === 0) {
+      setNotice('Nothing to download: everything chosen is already downloaded.');
+      return;
+    }
+    if (
+      selectedIds.length === 0 &&
+      jobs.length > CONFIRM_ABOVE &&
+      !window.confirm(
+        `Nothing is selected, so this will download all ${jobs.length} books the current filters show. Continue?`
+      )
+    ) {
+      return;
+    }
+
+    setNotice(null);
+    chrome.runtime.sendMessage({ type: 'START_BATCH_DOWNLOAD', payload: jobs }, () => {
+      if (chrome.runtime.lastError) {
+        setNotice('Could not reach the download worker. Reload the extension and try again.');
+      }
+    });
+  };
+
+  const handlePause = () => {
+    chrome.runtime.sendMessage({ type: 'PAUSE_DOWNLOADS' }, () => void chrome.runtime.lastError);
+  };
+
   const total = catalogList.length;
   const completedCount = catalogList.filter((i) => i.status === 'completed').length;
   const failedCount = catalogList.filter((i) => i.status === 'failed').length;
@@ -176,8 +259,8 @@ export const Dashboard: React.FC = () => {
         setFilter={setFilter}
         competencies={competenciesList}
         onStartScrape={handleStartScrape}
-        onStartBatch={() => setIsRunning(true)}
-        onStopBatch={() => setIsRunning(false)}
+        onStartBatch={handleStartBatch}
+        onStopBatch={handlePause}
         isRunning={isRunning}
         isScanning={isScanning}
       />
@@ -237,13 +320,15 @@ export const Dashboard: React.FC = () => {
         <div className="sv-selbar">
           {selectedIds.length > 0 ? (
             <>
-              <span><b>{selectedIds.length}</b> selected</span>
+              <span><b>{selectedIds.length}</b> selected. Start downloads only these.</span>
               <button type="button" className="sv-link-btn" onClick={() => setSelectedIds([])}>
                 Clear selection
               </button>
             </>
           ) : (
-            <span>Click a row to select it for download.</span>
+            <span>
+              Nothing selected: Start downloads all <b>{filteredCatalog.length}</b> books shown.
+            </span>
           )}
         </div>
 

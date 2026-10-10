@@ -77,7 +77,7 @@ export const SidebarFilter: React.FC<SidebarFilterProps> = ({
       <div className="sv-sidebar-body">
         <section>
           <div className="sv-section-head">
-            <h3 className="sv-section-title">File types</h3>
+            <h3 className="sv-section-title">Files to download</h3>
           </div>
 
           <div className="sv-toggle-group">

@@ -3,6 +3,7 @@
   "name": "Summary.com Batch Downloader",
   "version": "1.0.0",
   "description": "Batch download PDF summaries and MP3 audio files categorized by competencies from Summary.com.",
+  "minimum_chrome_version": "102",
   "action": {
     "default_popup": "index.html"
   },
@@ -10,8 +11,7 @@
   "permissions": [
     "downloads",
     "storage",
-    "tabs",
-    "scripting"
+    "tabs"
   ],
   "host_permissions": [
     "https://*.summary.com/*"

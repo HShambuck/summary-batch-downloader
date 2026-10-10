@@ -512,7 +512,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
   if (message.type === 'START_SCRAPE') {
     if (isScanning) {
       sendResponse({ success: true, busy: true });
-      return;
+      return false;
     }
     isScanning = true;
     storageSet({ isScanning: true });
@@ -528,5 +528,27 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
 
     // Answer right away; progress and results arrive through storage and the activity log
     sendResponse({ success: true, started: true });
+    return false;
   }
+
+  // The download worker asks this tab (which has your login) to read a book page's file links
+  if (message.type === 'RESOLVE_LINKS') {
+    const url = String(message.payload?.url || '');
+    fetch(url, { credentials: 'include' })
+      .then((res) => (res.ok ? res.text() : ''))
+      .then((html) => {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const links: Record<string, string> = {};
+        doc.querySelectorAll<HTMLAnchorElement>('a.download[data-type]').forEach((a) => {
+          const type = (a.getAttribute('data-type') || '').toLowerCase();
+          const href = absoluteUrl(a.getAttribute('href'), url);
+          if ((type === 'pdf' || type === 'mp3') && href && !links[type]) links[type] = href;
+        });
+        sendResponse({ links });
+      })
+      .catch(() => sendResponse({ links: {} }));
+    return true;
+  }
+
+  return false;
 });

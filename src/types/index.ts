@@ -1,10 +1,28 @@
 export type FileType = "pdf" | "mp3";
+export type FileState =
+  | "pending"
+  | "downloading"
+  | "completed"
+  | "failed"
+  | "unavailable";
 export type ItemStatus =
   | "pending"
   | "downloading"
   | "completed"
   | "failed"
   | "skipped";
+
+export interface ItemDownloadState {
+  pdf?: FileState;
+  mp3?: FileState;
+}
+export interface DownloadJob {
+  id: string;
+  title: string;
+  author: string;
+  category: string;
+  kinds: FileType[];
+}
 
 export interface LogEntry {
   id: string;
@@ -55,6 +73,8 @@ export interface StorageState {
   isScanning?: boolean; // add
   pageSize?: number; // add
   logs?: LogEntry[];
+  downloadState?: Record<string, ItemDownloadState>;
+  downloadQueue?: DownloadJob[];
 }
 
 // Expand message types to include all events used by background script
@@ -66,6 +86,7 @@ export type ExtensionMessageType =
   | "PAUSE_DOWNLOADS"
   | "CANCEL_DOWNLOADS"
   | "DOWNLOAD_PROGRESS"
+  | "RESOLVE_LINKS"
   | "SCRAPE_COMPLETE";
 
 export interface ExtensionMessage {

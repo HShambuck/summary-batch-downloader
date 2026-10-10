@@ -106,7 +106,14 @@ export const CatalogTable: React.FC<CatalogTableProps> = ({
                     </div>
                   </td>
                   <td>
-                    <span className={`sv-type ${typeClass}`}>{displayType.toUpperCase()}</span>
+                    {item.type === 'summary' ? (
+                      <>
+                        <span className="sv-type sv-type-pdf">PDF</span>{' '}
+                        <span className="sv-type sv-type-mp3">MP3</span>
+                      </>
+                    ) : (
+                      <span className={`sv-type ${typeClass}`}>{displayType.toUpperCase()}</span>
+                    )}
                   </td>
                   <td>
                     <StatusBadge status={item.status} />
