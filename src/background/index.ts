@@ -18,6 +18,8 @@ const DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 
 let loopActive = false;
 let activeDownloadId: number | null = null;
+// File names we want, keyed by download URL, so the browser can't swap in the site's own file name
+const plannedNames = new Map<string, string>();
 
 console.log('[Summary.com Background Worker] Initialized.');
 
@@ -143,8 +145,7 @@ function cleanSegment(text: string, max = 120): string {
 
 function buildFilename(job: DownloadJob, kind: FileType): string {
   const author = job.author && job.author !== DEFAULT_AUTHOR ? ` - ${job.author}` : '';
-  const typeFolder = kind === 'pdf' ? 'PDF' : 'Audio';
-  return `${ROOT_FOLDER}/${typeFolder}/${cleanSegment(job.category)}/${cleanSegment(job.title + author)}.${kind}`;
+  return `${ROOT_FOLDER}/${cleanSegment(job.category)}/${cleanSegment(job.title + author)}.${kind}`;
 }
 
 function startDownload(url: string, filename: string): Promise<number> {
@@ -199,14 +200,17 @@ function waitForDownload(id: number): Promise<{ ok: boolean; error?: string }> {
 
 async function downloadFile(url: string, filename: string): Promise<{ ok: boolean; error?: string }> {
   let id: number;
+  plannedNames.set(url, filename);
   try {
     id = await startDownload(url, filename);
   } catch (err) {
+    plannedNames.delete(url);
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
   activeDownloadId = id;
   const result = await waitForDownload(id);
   activeDownloadId = null;
+  plannedNames.delete(url);
 
   if (result.ok) {
     const item = await getDownload(id);
@@ -361,6 +365,13 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
 });
 
 /* ───────── Lifecycle ───────── */
+
+// Force our file name (Title - Author.pdf) even if the site's response suggests its own
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  const wanted = plannedNames.get(item.url) || plannedNames.get(item.finalUrl);
+  if (wanted) suggest({ filename: wanted, conflictAction: 'overwrite' });
+  else suggest(); // not ours: keep the default
+});
 
 // A browser restart or extension reload ends any running batch; wait for the user to press Start
 chrome.runtime.onStartup.addListener(() => {
